@@ -40,6 +40,7 @@ var (
 
 const (
 	defaultContentType = "application/grpc"
+	DefaultSleepAfterDeregister = time.Second*2
 )
 
 type grpcServer struct {
@@ -758,6 +759,9 @@ func (g *grpcServer) Start() error {
 		if err := g.Deregister(); err != nil {
 			log.Log("Server deregister error: ", err)
 		}
+
+		// Add sleep for those requests which have selected this port.
+		time.Sleep(DefaultSleepAfterDeregister)
 
 		// wait for waitgroup
 		if g.wg != nil {
