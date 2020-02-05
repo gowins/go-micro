@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -776,6 +777,11 @@ func (g *grpcServer) Start() error {
 
 		// disconnect broker
 		config.Broker.Disconnect()
+
+		// syscall exit after 2s
+		time.AfterFunc(DefaultSleepAfterDeregister, func() {
+			os.Exit(0)
+		})
 	}()
 
 	return nil
