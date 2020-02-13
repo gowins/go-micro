@@ -789,7 +789,9 @@ func (g *grpcServer) Start() error {
 
 func (g *grpcServer) Stop() error {
 	ch := make(chan error)
+	log.Log("[ExitProgress] Stop is called, send error chan. before.")
 	g.exit <- ch
+	log.Log("[ExitProgress] Stop is called, send error chan. end.")
 	return <-ch
 }
 

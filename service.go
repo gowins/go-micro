@@ -10,6 +10,7 @@ import (
 	"github.com/micro/go-micro/config/cmd"
 	"github.com/micro/go-micro/metadata"
 	"github.com/micro/go-micro/server"
+	"github.com/micro/go-micro/util/log"
 )
 
 type service struct {
@@ -103,11 +104,13 @@ func (s *service) Stop() error {
 		return err
 	}
 
+	log.Log("[ExitProgress] Call AfterStop. before.")
 	for _, fn := range s.opts.AfterStop {
 		if err := fn(); err != nil {
 			gerr = err
 		}
 	}
+	log.Log("[ExitProgress] Call AfterStop. end.")
 
 	return gerr
 }
