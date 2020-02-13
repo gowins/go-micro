@@ -764,18 +764,24 @@ func (g *grpcServer) Start() error {
 		time.Sleep(DefaultSleepAfterDeregister)
 
 		// wait for waitgroup
+		log.Log("[ExitProgress] Start wait-group wait.")
 		if g.wg != nil {
 			g.wg.Wait()
 		}
 
 		// stop the grpc server
+		log.Log("[ExitProgress] Start GracefulStop.")
 		g.srv.GracefulStop()
 
 		// close transport
+		log.Log("[ExitProgress] Close transport.")
 		ch <- nil
 
 		// disconnect broker
+		log.Log("[ExitProgress] Disconnect config transport.")
 		config.Broker.Disconnect()
+
+		log.Log("[ExitProgress] All is done.")
 	}()
 
 	return nil
