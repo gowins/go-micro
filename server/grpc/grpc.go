@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -768,6 +769,12 @@ func (g *grpcServer) Start() error {
 		if g.wg != nil {
 			g.wg.Wait()
 		}
+
+		// Force exit process
+		time.AfterFunc(DefaultSleepAfterDeregister, func() {
+			log.Logf("[ExitProgress] Force exit process after %v seconds.", DefaultSleepAfterDeregister/time.Second)
+			os.Exit(0)
+		})
 
 		// stop the grpc server
 		log.Log("[ExitProgress] Start GracefulStop.")
