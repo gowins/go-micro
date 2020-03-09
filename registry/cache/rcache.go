@@ -2,6 +2,7 @@
 package cache
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -37,6 +38,8 @@ type cache struct {
 	watched map[string]bool
 
 	exit chan bool
+
+	updating sync.Map
 }
 
 var (
@@ -141,6 +144,35 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 
 	// get does the actual request for a service and cache it
 	get := func(service string) ([]*registry.Service, error) {
+		// 针对每个服务设置一把锁
+		m := new(sync.Mutex)
+		val, _ := c.updating.LoadOrStore(service, m)
+		mutx, ok := val.(*sync.Mutex)
+		if !ok {
+			return nil, fmt.Errorf("invalid logic: lock type error, service is %v", service)
+		}
+
+		mutx.Lock()
+		defer mutx.Unlock()
+
+		// read lock
+		c.RLock()
+		// check the cache first
+		services := c.cache[service]
+		// get cache ttl
+		ttl := c.ttls[service]
+		// unlock the read
+		c.RUnlock()
+
+		// got services && within ttl so return cache
+		if c.isValid(services, ttl) {
+			// make a copy
+			cp := c.cp(services)
+			// return servics
+			return cp, nil
+		}
+		log.Logf("get service(%v) from etcd at %v", service, time.Now().UnixNano())
+
 		// ask the registry
 		services, err := c.Registry.GetService(service)
 		if err != nil {
@@ -156,15 +188,51 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 	}
 
 	// watch service if not watched
-	if _, ok := c.watched[service]; !ok {
-		go c.run(service)
-	}
+	go c.run(service, get)
 
 	// unlock the read lock
 	c.RUnlock()
 
 	// get and return services
 	return get(service)
+}
+
+// interval 计算某个服务需要更新的间隔
+// x - rand(5 - 8)  周期 46-50s 之间更新一次
+func interval(in time.Duration) time.Duration {
+	rand.Seed(time.Now().UnixNano())
+	// [0,n)
+	d := in - time.Duration(rand.Int63n(5) + 10) *time.Second
+
+	return d
+}
+
+func (c *cache) refreshByTimer(service string, get func(service string) ([]*registry.Service, error)) {
+	d := interval(c.opts.TTL)
+	log.Logf("service(%v) will refresh cache by interval(%v)", service, d)
+
+	for {
+		if c.quit() {
+			return
+		}
+
+		// 进入更新时先等下，错开服务启动一刻的批量请求
+		j := rand.Int63n(100)
+		time.Sleep(time.Duration(j) * time.Millisecond)
+
+		// 重试两次，防止一次失败
+		for i := 1; i <= 2; i++ {
+			_, err := get(service)
+			if err == nil {
+				break
+			}
+			log.Logf("get service(%v) from registry failed(count: %v): %v", service, i, err.Error())
+		}
+
+		select {
+		case <-time.After(d):
+		}
+	}
 }
 
 func (c *cache) set(service string, services []*registry.Service) {
@@ -282,11 +350,18 @@ func (c *cache) update(res *registry.Result) {
 
 // run starts the cache watcher loop
 // it creates a new watcher if there's a problem
-func (c *cache) run(service string) {
+func (c *cache) run(service string, get func(service string) ([]*registry.Service, error)) {
 	// set watcher
 	c.Lock()
+	if v, ok := c.watched[service]; ok && v == true {
+		return
+	}
+
 	c.watched[service] = true
 	c.Unlock()
+
+	// 开启定时刷新
+	go c.refreshByTimer(service, get)
 
 	// delete watcher on exit
 	defer func() {
