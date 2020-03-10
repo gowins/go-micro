@@ -46,6 +46,10 @@ var (
 	DefaultTTL = time.Minute
 )
 
+// opGet 是从 etcd 获取数据的行为
+// forced 是否 "强制更新"
+type opGet func(service string, forced bool) ([]*registry.Service, error)
+
 func backoff(attempts int) time.Duration {
 	if attempts == 0 {
 		return time.Duration(0)
@@ -143,7 +147,8 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 	}
 
 	// get does the actual request for a service and cache it
-	get := func(service string) ([]*registry.Service, error) {
+	var get opGet
+	get = func(service string, forced bool) ([]*registry.Service, error) {
 		// 针对每个服务设置一把锁
 		m := new(sync.Mutex)
 		val, _ := c.updating.LoadOrStore(service, m)
@@ -155,24 +160,29 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 		mutx.Lock()
 		defer mutx.Unlock()
 
-		// read lock
-		c.RLock()
-		// check the cache first
-		services := c.cache[service]
-		// get cache ttl
-		ttl := c.ttls[service]
-		// unlock the read
-		c.RUnlock()
+		if !forced {
+			// read lock
+			c.RLock()
+			// check the cache first
+			services := c.cache[service]
+			// get cache ttl
+			ttl := c.ttls[service]
+			// unlock the read
+			c.RUnlock()
 
-		// got services && within ttl so return cache
-		if c.isValid(services, ttl) {
-			// make a copy
-			cp := c.cp(services)
-			// return servics
-			return cp, nil
+			// got services && within ttl so return cache
+			if c.isValid(services, ttl) {
+				// make a copy
+				cp := c.cp(services)
+				// return servics
+				return cp, nil
+			}
 		}
-		log.Logf("get service(%v) from etcd at %v", service, time.Now().UnixNano())
 
+		t := time.Now()
+		defer func() {
+			log.Logf("get service(%v) from etcd at: %v cost: %v", service, t.Format(time.RFC3339Nano), time.Since(t))
+		}()
 		// ask the registry
 		services, err := c.Registry.GetService(service)
 		if err != nil {
@@ -194,20 +204,20 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 	c.RUnlock()
 
 	// get and return services
-	return get(service)
+	return get(service, false) // 不"强制更新"
 }
 
 // interval 计算某个服务需要更新的间隔
-// x - rand(5 - 8)  周期 46-50s 之间更新一次
+// x - rand(5 - 24)  周期 36-55s 之间更新一次
 func interval(in time.Duration) time.Duration {
 	rand.Seed(time.Now().UnixNano())
 	// [0,n)
-	d := in - time.Duration(rand.Int63n(5) + 10) *time.Second
+	d := in - time.Duration(rand.Int63n(20) + 5) *time.Second
 
 	return d
 }
 
-func (c *cache) refreshByTimer(service string, get func(service string) ([]*registry.Service, error)) {
+func (c *cache) refreshByTimer(service string, get opGet) {
 	d := interval(c.opts.TTL)
 	log.Logf("service(%v) will refresh cache by interval(%v)", service, d)
 
@@ -222,7 +232,7 @@ func (c *cache) refreshByTimer(service string, get func(service string) ([]*regi
 
 		// 重试两次，防止一次失败
 		for i := 1; i <= 2; i++ {
-			_, err := get(service)
+			_, err := get(service, true) // "强制更新"
 			if err == nil {
 				break
 			}
@@ -350,7 +360,7 @@ func (c *cache) update(res *registry.Result) {
 
 // run starts the cache watcher loop
 // it creates a new watcher if there's a problem
-func (c *cache) run(service string, get func(service string) ([]*registry.Service, error)) {
+func (c *cache) run(service string, get opGet) {
 	// set watcher
 	c.Lock()
 	if v, ok := c.watched[service]; ok && v == true {
