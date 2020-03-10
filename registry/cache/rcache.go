@@ -239,9 +239,7 @@ func (c *cache) refreshByTimer(service string, get opGet) {
 			log.Logf("get service(%v) from registry failed(count: %v): %v", service, i, err.Error())
 		}
 
-		select {
-		case <-time.After(d):
-		}
+		time.Sleep(d)
 	}
 }
 
