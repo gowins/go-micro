@@ -181,7 +181,7 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 
 		t := time.Now()
 		defer func() {
-			log.Logf("get service(%v) from etcd at: %v cost: %v", service, t.Format(time.RFC3339Nano), time.Since(t))
+			log.Logf("[rcache-getservice]get service(%v) from etcd at: %v cost: %v forced: %v", service, t.Format(time.RFC3339Nano), time.Since(t), forced)
 		}()
 		// ask the registry
 		services, err := c.Registry.GetService(service)
@@ -208,11 +208,11 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 }
 
 // interval 计算某个服务需要更新的间隔
-// x - rand(5 - 24)  周期 36-55s 之间更新一次
+// x - rand(1 - 19)  周期 41-59s 之间更新一次
 func interval(in time.Duration) time.Duration {
 	rand.Seed(time.Now().UnixNano())
 	// [0,n)
-	d := in - time.Duration(rand.Int63n(20) + 5) *time.Second
+	d := in - time.Duration(rand.Int63n(19) + 1) *time.Second
 
 	return d
 }
