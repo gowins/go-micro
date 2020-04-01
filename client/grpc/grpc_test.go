@@ -9,7 +9,7 @@ import (
 	"github.com/micro/go-micro/client/selector"
 	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/registry/memory"
-	pgrpc "google.golang.org/grpc"
+	"google.golang.org/grpc"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 )
 
@@ -28,7 +28,7 @@ func TestGRPCClient(t *testing.T) {
 	}
 	defer l.Close()
 
-	s := pgrpc.NewServer()
+	s := grpc.NewServer()
 	pb.RegisterGreeterServer(s, &greeterServer{})
 
 	go s.Serve(l)

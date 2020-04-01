@@ -5,10 +5,10 @@ import (
 	"context"
 	"log"
 
-	client "github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/micro/go-micro/config/options"
 	"github.com/micro/go-micro/store"
+	client "go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
 type ekv struct {

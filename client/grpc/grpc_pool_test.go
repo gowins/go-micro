@@ -6,8 +6,11 @@ import (
 	"time"
 
 	"context"
+
+	"github.com/onsi/gomega"
+
 	"google.golang.org/grpc"
-	pgrpc "google.golang.org/grpc"
+
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 )
 
@@ -19,7 +22,7 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 	}
 	defer l.Close()
 
-	s := pgrpc.NewServer()
+	s := grpc.NewServer()
 	pb.RegisterGreeterServer(s, &greeterServer{})
 
 	go s.Serve(l)
@@ -50,7 +53,7 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 		p.release(l.Addr().String(), cc, nil)
 
 		p.Lock()
-		if i := len(p.conns[l.Addr().String()]); i > size {
+		if i := p.conns[l.Addr().String()].size(); i > size {
 			p.Unlock()
 			t.Fatalf("pool size %d is greater than expected %d", i, size)
 		}
@@ -61,4 +64,53 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 func TestGRPCPool(t *testing.T) {
 	testPool(t, 0, time.Minute)
 	testPool(t, 2, time.Minute)
+}
+
+func TestList(t *testing.T) {
+	g := gomega.NewGomegaWithT(t)
+	l := newList()
+
+	cc, err := grpc.Dial("127.0.0.1:8080", grpc.WithInsecure())
+	g.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	p := &poolConn{cc, time.Now().Unix(), nil, nil}
+
+	l.emplace(p)
+	g.Expect(l.size()).Should(gomega.Equal(1))
+	g.Expect(p).Should(gomega.Equal(l.head))
+
+	p = &poolConn{}
+	l.emplace(p)
+	g.Expect(l.size()).Should(gomega.Equal(2))
+	g.Expect(p).Should(gomega.Equal(l.head.next))
+
+	p = &poolConn{}
+	l.emplace(p)
+	g.Expect(l.size()).Should(gomega.Equal(3))
+
+	l.erase()
+	g.Expect(l.size()).Should(gomega.Equal(2))
+
+	l.erase()
+	g.Expect(l.size()).Should(gomega.Equal(1))
+
+	l.erase()
+	g.Expect(l.size()).Should(gomega.Equal(0))
+
+	l.erase()
+	g.Expect(l.size()).Should(gomega.Equal(0))
+}
+
+func BenchmarkList(b *testing.B) {
+	l := newList()
+	var p *poolConn
+	for i := 0; i < b.N; i++ {
+		p = &poolConn{}
+		l.emplace(p)
+	}
+	b.Log(l.size())
+
+	for i := 0; i < b.N; i++ {
+		l.erase()
+	}
 }

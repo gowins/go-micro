@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/micro/go-micro/codec"
 	raw "github.com/micro/go-micro/codec/bytes"
@@ -11,7 +12,6 @@ import (
 	"github.com/micro/go-micro/codec/proto"
 	"github.com/micro/go-micro/codec/protorpc"
 	"github.com/micro/go-micro/transport"
-	"github.com/pkg/errors"
 )
 
 type rpcCodec struct {
@@ -284,7 +284,7 @@ func (c *rpcCodec) Write(r *codec.Message, b interface{}) error {
 		c.buf.wbuf.Reset()
 
 		// write an error if it failed
-		m.Error = errors.Wrapf(err, "Unable to encode body").Error()
+		m.Error = fmt.Errorf("Unable to encode body: %v", err).Error()
 		m.Header["X-Micro-Error"] = m.Error
 		m.Header["Micro-Error"] = m.Error
 		// no body to write

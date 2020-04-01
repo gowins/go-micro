@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/util/log"
 	hash "github.com/mitchellh/hashstructure"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
 var (
