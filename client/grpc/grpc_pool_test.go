@@ -73,32 +73,41 @@ func TestList(t *testing.T) {
 	cc, err := grpc.Dial("127.0.0.1:8080", grpc.WithInsecure())
 	g.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	p := &poolConn{cc, time.Now().Unix(), nil, nil}
+	p := &poolConn{cc, 1, nil, nil}
 
 	l.emplace(p)
 	g.Expect(l.size()).Should(gomega.Equal(1))
 	g.Expect(p).Should(gomega.Equal(l.head))
 
-	p = &poolConn{}
-	l.emplace(p)
+	p1 := &poolConn{nil, 2, nil, nil}
+	l.emplace(p1)
 	g.Expect(l.size()).Should(gomega.Equal(2))
-	g.Expect(p).Should(gomega.Equal(l.head.next))
+	g.Expect(p1).Should(gomega.Equal(l.head.next))
+	g.Expect(l.head.next.front.created).Should(gomega.Equal(p.created))
 
-	p = &poolConn{}
-	l.emplace(p)
+	p2 := &poolConn{nil, 3, nil, nil}
+	l.emplace(p2)
 	g.Expect(l.size()).Should(gomega.Equal(3))
+	t.Log("head:", *l.head, "next1:", *l.head.next)
+	t.Log("newxt2:", *l.head.next.next, "next3:", *l.head.next.next.next)
 
-	l.erase()
+	pop := l.popFront()
 	g.Expect(l.size()).Should(gomega.Equal(2))
+	g.Expect(pop.created).Should(gomega.Equal(p.created))
+	t.Log("head:", *l.head, "next1:", *l.head.next)
+	t.Log("newxt2:", *l.head.next.next, "next3:", *l.head.next.next.next)
 
-	l.erase()
+	pop = l.popFront()
+	t.Log("pop1:", *pop)
 	g.Expect(l.size()).Should(gomega.Equal(1))
 
-	l.erase()
+	pop = l.popFront()
 	g.Expect(l.size()).Should(gomega.Equal(0))
+	g.Expect(pop.created).Should(gomega.Equal(p2.created))
 
-	l.erase()
+	pop = l.popFront()
 	g.Expect(l.size()).Should(gomega.Equal(0))
+	g.Expect(pop).Should(gomega.BeNil())
 }
 
 func BenchmarkList(b *testing.B) {
@@ -111,6 +120,6 @@ func BenchmarkList(b *testing.B) {
 	b.Log(l.size())
 
 	for i := 0; i < b.N; i++ {
-		l.erase()
+		l.popFront()
 	}
 }

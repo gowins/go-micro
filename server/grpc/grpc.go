@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -37,6 +38,8 @@ var (
 	// DefaultMaxMsgSize define maximum message size that server can send
 	// or receive.  Default value is 4MB.
 	DefaultMaxMsgSize = 1024 * 1024 * 4
+	//
+	MaxConcurrentStreams = uint32(60)
 )
 
 const (
@@ -110,6 +113,14 @@ func (g *grpcServer) configure(opts ...server.Option) {
 		grpc.MaxRecvMsgSize(maxMsgSize),
 		grpc.MaxSendMsgSize(maxMsgSize),
 		grpc.UnknownServiceHandler(g.handler),
+		grpc.MaxConcurrentStreams(MaxConcurrentStreams),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			PermitWithoutStream: true,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    10 * time.Second,
+			Timeout: 3 * time.Second,
+		}),
 	}
 
 	if creds := g.getCredentials(); creds != nil {
