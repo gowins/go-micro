@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/keepalive"
 	gmetadata "google.golang.org/grpc/metadata"
 )
 
@@ -108,8 +109,6 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	maxRecvMsgSize := g.maxRecvMsgSizeValue()
 	maxSendMsgSize := g.maxSendMsgSizeValue()
 
-	var grr error
-
 	grpcDialOptions := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
 		grpc.WithTimeout(opts.DialTimeout),
@@ -118,6 +117,11 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
 			grpc.MaxCallSendMsgSize(maxSendMsgSize),
 		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second,
+			Timeout:             3 * time.Second,
+			PermitWithoutStream: true,
+		}),
 	}
 
 	if opts := g.getGrpcDialOptions(); opts != nil {
@@ -130,28 +134,15 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	}
 	defer func() {
 		// defer execution of release
-		g.pool.release(address, cc, grr)
+		g.pool.release(address, cc)
 	}()
 
-	ch := make(chan error, 1)
-
-	go func() {
-		grpcCallOptions := []grpc.CallOption{grpc.CallContentSubtype(cf.Name())}
-		if opts := g.getGrpcCallOptions(); opts != nil {
-			grpcCallOptions = append(grpcCallOptions, opts...)
-		}
-		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpcCallOptions...)
-		ch <- microError(err)
-	}()
-
-	select {
-	case err := <-ch:
-		grr = err
-	case <-ctx.Done():
-		grr = ctx.Err()
+	grpcCallOptions := []grpc.CallOption{grpc.CallContentSubtype(cf.Name())}
+	if opts := g.getGrpcCallOptions(); opts != nil {
+		grpcCallOptions = append(grpcCallOptions, opts...)
 	}
 
-	return grr
+	return cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpcCallOptions...)
 }
 
 func (g *grpcClient) stream(ctx context.Context, node *registry.Node, req client.Request, opts client.CallOptions) (client.Stream, error) {
@@ -302,7 +293,7 @@ func (g *grpcClient) Init(opts ...client.Option) error {
 	// update pool configuration if the options changed
 	if size != g.opts.PoolSize || ttl != g.opts.PoolTTL {
 		g.pool.Lock()
-		g.pool.size = g.opts.PoolSize
+		g.pool.size = uint(g.opts.PoolSize)
 		g.pool.ttl = int64(g.opts.PoolTTL.Seconds())
 		g.pool.Unlock()
 	}
@@ -619,7 +610,7 @@ func newClient(opts ...client.Option) client.Client {
 	rc := &grpcClient{
 		once: sync.Once{},
 		opts: options,
-		pool: newPool(options.PoolSize, options.PoolTTL),
+		pool: newPool(uint(options.PoolSize), options.PoolTTL),
 	}
 
 	c := client.Client(rc)

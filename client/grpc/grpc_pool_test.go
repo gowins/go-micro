@@ -14,7 +14,7 @@ import (
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 )
 
-func testPool(t *testing.T, size int, ttl time.Duration) {
+func testPool(t *testing.T, size uint, ttl time.Duration) {
 	// setup server
 	l, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -50,7 +50,7 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 		}
 
 		// release the conn
-		p.release(l.Addr().String(), cc, nil)
+		p.release(l.Addr().String(), cc)
 
 		p.Lock()
 		if i := p.conns[l.Addr().String()].size(); i > size {
@@ -62,7 +62,7 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 }
 
 func TestGRPCPool(t *testing.T) {
-	testPool(t, 0, time.Minute)
+	testPool(t, 1, time.Minute)
 	testPool(t, 2, time.Minute)
 }
 
@@ -73,40 +73,37 @@ func TestList(t *testing.T) {
 	cc, err := grpc.Dial("127.0.0.1:8080", grpc.WithInsecure())
 	g.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	p := &poolConn{cc, 1, nil, nil}
+	p := &poolConn{cc, 1, nil}
 
 	l.emplace(p)
-	g.Expect(l.size()).Should(gomega.Equal(1))
+	g.Expect(l.size()).Should(gomega.Equal(uint(1)))
 	g.Expect(p).Should(gomega.Equal(l.head))
 
-	p1 := &poolConn{nil, 2, nil, nil}
+	p1 := &poolConn{nil, 2, nil}
 	l.emplace(p1)
-	g.Expect(l.size()).Should(gomega.Equal(2))
+	g.Expect(l.size()).Should(gomega.Equal(uint(2)))
 	g.Expect(p1).Should(gomega.Equal(l.head.next))
-	g.Expect(l.head.next.front.created).Should(gomega.Equal(p.created))
 
-	p2 := &poolConn{nil, 3, nil, nil}
+	p2 := &poolConn{nil, 3, nil}
 	l.emplace(p2)
-	g.Expect(l.size()).Should(gomega.Equal(3))
+	g.Expect(l.size()).Should(gomega.Equal(uint(3)))
 	t.Log("head:", *l.head, "next1:", *l.head.next)
-	t.Log("newxt2:", *l.head.next.next, "next3:", *l.head.next.next.next)
 
 	pop := l.popFront()
-	g.Expect(l.size()).Should(gomega.Equal(2))
+	g.Expect(l.size()).Should(gomega.Equal(uint(2)))
 	g.Expect(pop.created).Should(gomega.Equal(p.created))
 	t.Log("head:", *l.head, "next1:", *l.head.next)
-	t.Log("newxt2:", *l.head.next.next, "next3:", *l.head.next.next.next)
 
 	pop = l.popFront()
 	t.Log("pop1:", *pop)
-	g.Expect(l.size()).Should(gomega.Equal(1))
+	g.Expect(l.size()).Should(gomega.Equal(uint(1)))
 
 	pop = l.popFront()
-	g.Expect(l.size()).Should(gomega.Equal(0))
+	g.Expect(l.size()).Should(gomega.Equal(uint(0)))
 	g.Expect(pop.created).Should(gomega.Equal(p2.created))
 
 	pop = l.popFront()
-	g.Expect(l.size()).Should(gomega.Equal(0))
+	g.Expect(l.size()).Should(gomega.Equal(uint(0)))
 	g.Expect(pop).Should(gomega.BeNil())
 }
 

@@ -4,17 +4,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
-	"google.golang.org/grpc/keepalive"
 )
 
 // http2每个连接承载的数据链路，与服务端设置保持一致
 var MaxConcurrentStreams = uint32(60)
 
 type pool struct {
-	size int
+	size uint
 	ttl  int64
 
 	sync.Mutex
@@ -23,22 +21,18 @@ type pool struct {
 
 type poolConn struct {
 	*grpc.ClientConn
-	id      string // 标识连接唯一
 	created int64
 
-	countConn uint32 // 此连接承载的连接数
-
-	front *poolConn
-	next  *poolConn
+	next *poolConn
 }
 
 type poolList struct {
-	count int
+	count uint
 
 	head *poolConn
 }
 
-func newPool(size int, ttl time.Duration) *pool {
+func newPool(size uint, ttl time.Duration) *pool {
 	return &pool{
 		size:  size,
 		ttl:   int64(ttl.Seconds()),
@@ -51,7 +45,7 @@ func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) 
 	conns, ok := p.conns[addr]
 	if !ok {
 		// not existing
-		p.conns[addr] = newList()
+		conns = newList()
 	}
 
 	conn := conns.popFront()
@@ -62,11 +56,9 @@ func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) 
 	for conn != nil {
 		// 外部获取的时候检测连接状态
 		switch conn.GetState() {
-		case connectivity.Connecting:
 		case connectivity.Shutdown:
 		case connectivity.TransientFailure:
 			conn.ClientConn.Close()
-			conns.erases(conn.id)
 			conn = conns.popFront()
 			continue
 		default:
@@ -77,25 +69,11 @@ func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) 
 				continue
 			}
 		}
-		// 连接增加
-		conn.countConn++
 		p.Unlock()
 		return conn, nil
 	}
 
 	p.Unlock()
-
-	// 更好的连接复用
-	ops := []grpc.DialOption{
-		grpc.WithInsecure(),
-		grpc.WithBackoffMaxDelay(3 * time.Second),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                10 * time.Second,
-			Timeout:             3 * time.Second,
-			PermitWithoutStream: true,
-		}),
-	}
-	opts = append(opts, ops...)
 
 	// create new conn
 	cc, err := grpc.Dial(addr, opts...)
@@ -103,18 +81,12 @@ func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) 
 		return nil, err
 	}
 
-	conn = &poolConn{cc, uuid.New().String(), time.Now().Unix(), 0, nil, nil}
+	conn = &poolConn{cc, time.Now().Unix(), nil}
 
 	return conn, nil
 }
 
-func (p *pool) release(addr string, conn *poolConn, err error) {
-	// don't store the conn if it has errored
-	if err != nil {
-		conn.ClientConn.Close()
-		return
-	}
-
+func (p *pool) release(addr string, conn *poolConn) {
 	// otherwise put it back for reuse
 	p.Lock()
 
@@ -129,81 +101,45 @@ func (p *pool) release(addr string, conn *poolConn, err error) {
 		conn.ClientConn.Close()
 		return
 	}
-	conns.push(conn)
+	conns.emplace(conn)
 	p.conns[addr] = conns
 	p.Unlock()
 }
 
-// 先进先出的队列
+// 链表
 func newList() *poolList {
-	return &poolList{}
-}
-
-// 把连接放回来
-func (l *poolList) push(node *poolConn) {
-	head := l.popFront()
-	for head != nil {
-		if head.id == node.id {
-			head.countConn--
-			break
-		}
-		head = l.popFront()
+	return &poolList{
+		count: 0,
+		head:  nil,
 	}
 }
 
-// 添加新项
+// 尾部添加新项
 func (l *poolList) emplace(node *poolConn) {
-	if l.head != nil {
-		// 头的前项是尾，把尾的后一项设为node
-		l.head.front.next = node
-
-		node.front = l.head.front
-		node.next = l.head
-
-		// 头的前一项设为node
-		l.head.front = node
-	} else {
+	if l.count == 0 {
 		l.head = node
-		// 只有一个的时候
-		l.head.front = node
-		l.head.next = node
+		node.next = nil
+	} else {
+		end := l.head
+		for i := uint(0); i < l.count-1; i++ {
+			end = end.next
+		}
+		end.next = node
 	}
-
 	l.count++
 }
 
-// 如果没有适合要求的返回nil
+// 获取头并移除
 func (l *poolList) popFront() *poolConn {
 	if l.count > 0 {
 		head := l.head
 		l.head = head.next
+		l.count--
 		return head
 	}
 	return nil
 }
 
-// 删除头项
-func (l *poolList) erases(id string) {
-	if l.count <= 1 {
-		l.head = nil
-		l.count = 0
-		return
-	}
-	head := l.popFront()
-	for head != nil {
-		if head.id == id {
-			// 设置新的头前项
-			l.head.front = head.front
-
-			// 设置尾的前项
-			head.front.next = l.head
-			l.count--
-			break
-		}
-		head = l.popFront()
-	}
-}
-
-func (l *poolList) size() int {
+func (l *poolList) size() uint {
 	return l.count
 }

@@ -113,7 +113,6 @@ func (g *grpcServer) configure(opts ...server.Option) {
 		grpc.MaxRecvMsgSize(maxMsgSize),
 		grpc.MaxSendMsgSize(maxMsgSize),
 		grpc.UnknownServiceHandler(g.handler),
-		grpc.MaxConcurrentStreams(MaxConcurrentStreams),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			PermitWithoutStream: true,
 		}),

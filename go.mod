@@ -49,7 +49,6 @@ require (
 	github.com/nlopes/slack v0.6.0
 	github.com/onsi/gomega v1.4.3
 	github.com/spf13/pflag v1.0.3 // indirect
-	github.com/stretchr/testify v1.4.0
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20190109142713-0ad062ec5ee5 // indirect
 	go.etcd.io/etcd v0.0.0-20200329194727-bdc9bc1d816e
