@@ -6,12 +6,15 @@ import (
 	"time"
 
 	"context"
+
+	"github.com/onsi/gomega"
+
 	"google.golang.org/grpc"
-	pgrpc "google.golang.org/grpc"
+
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 )
 
-func testPool(t *testing.T, size int, ttl time.Duration) {
+func testPool(t *testing.T, size uint, ttl time.Duration) {
 	// setup server
 	l, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -19,7 +22,7 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 	}
 	defer l.Close()
 
-	s := pgrpc.NewServer()
+	s := grpc.NewServer()
 	pb.RegisterGreeterServer(s, &greeterServer{})
 
 	go s.Serve(l)
@@ -47,10 +50,10 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 		}
 
 		// release the conn
-		p.release(l.Addr().String(), cc, nil)
+		p.release(l.Addr().String(), cc)
 
 		p.Lock()
-		if i := len(p.conns[l.Addr().String()]); i > size {
+		if i := p.conns[l.Addr().String()].size(); i > size {
 			p.Unlock()
 			t.Fatalf("pool size %d is greater than expected %d", i, size)
 		}
@@ -59,6 +62,61 @@ func testPool(t *testing.T, size int, ttl time.Duration) {
 }
 
 func TestGRPCPool(t *testing.T) {
-	testPool(t, 0, time.Minute)
+	testPool(t, 1, time.Minute)
 	testPool(t, 2, time.Minute)
+}
+
+func TestList(t *testing.T) {
+	g := gomega.NewGomegaWithT(t)
+	l := newList()
+
+	cc, err := grpc.Dial("127.0.0.1:8080", grpc.WithInsecure())
+	g.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	p := &poolConn{cc, 1, nil}
+
+	l.emplace(p)
+	g.Expect(l.size()).Should(gomega.Equal(uint(1)))
+	g.Expect(p).Should(gomega.Equal(l.head))
+
+	p1 := &poolConn{nil, 2, nil}
+	l.emplace(p1)
+	g.Expect(l.size()).Should(gomega.Equal(uint(2)))
+	g.Expect(p1).Should(gomega.Equal(l.head.next))
+
+	p2 := &poolConn{nil, 3, nil}
+	l.emplace(p2)
+	g.Expect(l.size()).Should(gomega.Equal(uint(3)))
+	t.Log("head:", *l.head, "next1:", *l.head.next)
+
+	pop := l.popFront()
+	g.Expect(l.size()).Should(gomega.Equal(uint(2)))
+	g.Expect(pop.created).Should(gomega.Equal(p.created))
+	t.Log("head:", *l.head, "next1:", *l.head.next)
+
+	pop = l.popFront()
+	t.Log("pop1:", *pop)
+	g.Expect(l.size()).Should(gomega.Equal(uint(1)))
+
+	pop = l.popFront()
+	g.Expect(l.size()).Should(gomega.Equal(uint(0)))
+	g.Expect(pop.created).Should(gomega.Equal(p2.created))
+
+	pop = l.popFront()
+	g.Expect(l.size()).Should(gomega.Equal(uint(0)))
+	g.Expect(pop).Should(gomega.BeNil())
+}
+
+func BenchmarkList(b *testing.B) {
+	l := newList()
+	var p *poolConn
+	for i := 0; i < b.N; i++ {
+		p = &poolConn{}
+		l.emplace(p)
+	}
+	b.Log(l.size())
+
+	for i := 0; i < b.N; i++ {
+		l.popFront()
+	}
 }

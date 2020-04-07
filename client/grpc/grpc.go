@@ -111,10 +111,9 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	maxRecvMsgSize := g.maxRecvMsgSizeValue()
 	maxSendMsgSize := g.maxSendMsgSizeValue()
 
-	var grr error
-
 	cc, err := g.pool.getConn(address, grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
-		grpc.WithTimeout(opts.DialTimeout), g.secure(),
+		grpc.WithTimeout(opts.DialTimeout),
+		g.secure(),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
 			grpc.MaxCallSendMsgSize(maxSendMsgSize),
@@ -122,26 +121,13 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	if err != nil {
 		return errors.InternalServerError("go.micro.client", fmt.Sprintf("Error sending request: %v", err))
 	}
+
 	defer func() {
 		// defer execution of release
-		g.pool.release(address, cc, grr)
+		g.pool.release(address, cc)
 	}()
 
-	ch := make(chan error, 1)
-
-	go func() {
-		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
-		ch <- microError(err)
-	}()
-
-	select {
-	case err := <-ch:
-		grr = err
-	case <-ctx.Done():
-		grr = ctx.Err()
-	}
-
-	return grr
+	return cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
 }
 
 func (g *grpcClient) stream(ctx context.Context, node *registry.Node, req client.Request, opts client.CallOptions) (client.Stream, error) {
@@ -282,7 +268,7 @@ func (g *grpcClient) Init(opts ...client.Option) error {
 	// update pool configuration if the options changed
 	if size != g.opts.PoolSize || ttl != g.opts.PoolTTL {
 		g.pool.Lock()
-		g.pool.size = g.opts.PoolSize
+		g.pool.size = uint(g.opts.PoolSize)
 		g.pool.ttl = int64(g.opts.PoolTTL.Seconds())
 		g.pool.Unlock()
 	}
@@ -555,7 +541,7 @@ func newClient(opts ...client.Option) client.Client {
 	rc := &grpcClient{
 		once: sync.Once{},
 		opts: options,
-		pool: newPool(options.PoolSize, options.PoolTTL),
+		pool: newPool(uint(options.PoolSize), options.PoolTTL),
 	}
 
 	c := client.Client(rc)
