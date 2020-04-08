@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/json-iterator/go"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/micro/go-micro/codec"
 	"github.com/micro/go-micro/codec/bytes"
 	"github.com/micro/go-micro/codec/jsonrpc"
@@ -166,7 +166,9 @@ func (g *grpcCodec) Write(m *codec.Message, v interface{}) error {
 		return g.s.SendMsg(v)
 	}
 	// write the body using the framing codec
-	return g.s.SendMsg(&bytes.Frame{m.Body})
+	return g.s.SendMsg(&bytes.Frame{
+		Data: m.Body,
+	})
 }
 
 func (g *grpcCodec) Close() error {

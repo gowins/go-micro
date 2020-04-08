@@ -7,6 +7,7 @@ import (
 
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/onsi/gomega"
 
 	"google.golang.org/grpc"
@@ -73,18 +74,18 @@ func TestList(t *testing.T) {
 	cc, err := grpc.Dial("127.0.0.1:8080", grpc.WithInsecure())
 	g.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	p := &poolConn{cc, 1, nil}
+	p := &poolConn{cc, uuid.New().String(), 1, nil}
 
 	l.emplace(p)
 	g.Expect(l.size()).Should(gomega.Equal(uint(1)))
 	g.Expect(p).Should(gomega.Equal(l.head))
 
-	p1 := &poolConn{nil, 2, nil}
+	p1 := &poolConn{nil, uuid.New().String(), 2, nil}
 	l.emplace(p1)
 	g.Expect(l.size()).Should(gomega.Equal(uint(2)))
 	g.Expect(p1).Should(gomega.Equal(l.head.next))
 
-	p2 := &poolConn{nil, 3, nil}
+	p2 := &poolConn{nil, uuid.New().String(), 3, nil}
 	l.emplace(p2)
 	g.Expect(l.size()).Should(gomega.Equal(uint(3)))
 	t.Log("head:", *l.head, "next1:", *l.head.next)

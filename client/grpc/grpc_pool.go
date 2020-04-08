@@ -1,9 +1,11 @@
 package grpc
 
 import (
+	"log"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 )
@@ -18,6 +20,7 @@ type pool struct {
 
 type poolConn struct {
 	*grpc.ClientConn
+	id      string
 	created int64
 
 	next *poolConn
@@ -40,34 +43,33 @@ func newPool(size uint, ttl time.Duration) *pool {
 func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) {
 	p.Lock()
 	conns, ok := p.conns[addr]
-	if !ok {
-		// not existing
-		conns = newList()
-	}
+	var conn *poolConn
+	if ok {
+		// existing
+		conn = conns.popFront()
+		now := time.Now().Unix()
 
-	conn := conns.popFront()
-	now := time.Now().Unix()
-
-	// while we have conns check age and then return one
-	// otherwise we'll create a new conn
-	for conn != nil {
-		// 外部获取的时候检测连接状态
-		switch conn.GetState() {
-		case connectivity.Shutdown:
-		case connectivity.TransientFailure:
-			conn.ClientConn.Close()
-			conn = conns.popFront()
-			continue
-		default:
-			// if conn is old kill it and move on
-			if d := now - conn.created; d > p.ttl {
+		// while we have conns check age and then return one
+		// otherwise we'll create a new conn
+		for conn != nil {
+			// 外部获取的时候检测连接状态
+			switch conn.GetState() {
+			case connectivity.Shutdown:
+			case connectivity.TransientFailure:
 				conn.ClientConn.Close()
 				conn = conns.popFront()
 				continue
+			default:
+				// if conn is old kill it and move on
+				if d := now - conn.created; d > p.ttl {
+					conn.ClientConn.Close()
+					conn = conns.popFront()
+					continue
+				}
 			}
+			p.Unlock()
+			return conn, nil
 		}
-		p.Unlock()
-		return conn, nil
 	}
 
 	p.Unlock()
@@ -78,7 +80,7 @@ func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) 
 		return nil, err
 	}
 
-	conn = &poolConn{cc, time.Now().Unix(), nil}
+	conn = &poolConn{cc, uuid.New().String(), time.Now().Unix(), nil}
 
 	return conn, nil
 }
@@ -113,17 +115,28 @@ func newList() *poolList {
 
 // 尾部添加新项
 func (l *poolList) emplace(node *poolConn) {
+	if node == nil {
+		return
+	}
+	node.next = nil
 	if l.count == 0 {
 		l.head = node
-		node.next = nil
 	} else {
 		end := l.head
-		for i := uint(0); i < l.count-1; i++ {
+		isExist := false
+		for i := uint(1); i <= l.count-1; i++ {
+			if end.id == node.id {
+				isExist = true
+			}
 			end = end.next
+		}
+		if isExist {
+			return
 		}
 		end.next = node
 	}
 	l.count++
+	log.Printf("pool list count: %d", l.count)
 }
 
 // 获取头并移除
@@ -134,6 +147,7 @@ func (l *poolList) popFront() *poolConn {
 		l.count--
 		return head
 	}
+	log.Printf("pop front pool list count: %d", l.count)
 	return nil
 }
 

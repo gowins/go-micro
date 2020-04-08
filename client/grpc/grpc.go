@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/keepalive"
 	gmetadata "google.golang.org/grpc/metadata"
 )
 
@@ -117,17 +119,38 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
 			grpc.MaxCallSendMsgSize(maxSendMsgSize),
-		))
+		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second,
+			Timeout:             3 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	if err != nil {
 		return errors.InternalServerError("go.micro.client", fmt.Sprintf("Error sending request: %v", err))
 	}
 
-	defer func() {
-		// defer execution of release
-		g.pool.release(address, cc)
+	log.Printf("pool address: %s, createAt: %s, id: %s", address, time.Unix(cc.created, 0).Format("2006-01-02 15:04:05"), cc.id)
+
+	// defer execution of release
+	g.pool.release(address, cc)
+
+	var grr error
+	ch := make(chan error, 1)
+
+	go func() {
+		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
+		ch <- microError(err)
 	}()
 
-	return cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
+	select {
+	case err := <-ch:
+		grr = err
+	case <-ctx.Done():
+		grr = errors.Timeout("go.micro.client", "%v", ctx.Err())
+	}
+
+	return grr
 }
 
 func (g *grpcClient) stream(ctx context.Context, node *registry.Node, req client.Request, opts client.CallOptions) (client.Stream, error) {
