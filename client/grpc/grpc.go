@@ -132,9 +132,6 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 
 	log.Printf("pool address: %s, createAt: %s, id: %s", address, time.Unix(cc.created, 0).Format("2006-01-02 15:04:05"), cc.id)
 
-	// defer execution of release
-	g.pool.release(address, cc)
-
 	var grr error
 	ch := make(chan error, 1)
 
@@ -142,6 +139,9 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
 		ch <- microError(err)
 	}()
+
+	// execution of release
+	g.pool.release(address, cc)
 
 	select {
 	case err := <-ch:
