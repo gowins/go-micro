@@ -118,7 +118,7 @@ func newList(max uint) *poolList {
 	return &poolList{
 		maxSize: max,
 		count:   0,
-		current: 1,
+		current: 0,
 		head:    nil,
 	}
 }

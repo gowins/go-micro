@@ -88,21 +88,25 @@ func TestList(t *testing.T) {
 	p2 := &poolConn{nil, uuid.New().String(), 3, nil}
 	l.emplace(p2)
 	g.Expect(l.size()).Should(gomega.Equal(uint(3)))
-	t.Log("head:", *l.head, "next1:", *l.head.next)
 
 	pop := l.popFront()
-	g.Expect(pop.created).Should(gomega.Equal(p.created))
-	t.Log("head:", *l.head, "next1:", *l.head.next)
-	t.Log("current:", l.current)
+	g.Expect(pop.id).Should(gomega.Equal(p.id))
 
 	pop = l.popFront()
-	t.Log("pop1:", *pop)
+	g.Expect(pop.id).Should(gomega.Equal(p1.id))
 
 	pop = l.popFront()
-	t.Log("pop2:", *pop)
+	g.Expect(pop.id).Should(gomega.Equal(p2.id))
 
 	pop = l.popFront()
 	g.Expect(pop).Should(gomega.BeNil())
+
+	l.erase(p)
+	g.Expect(l.count).Should(gomega.Equal(uint(2)))
+	g.Expect(l.head.id).Should(gomega.Equal(p1.id))
+
+	l.erase(p2)
+	g.Expect(l.count).Should(gomega.Equal(uint(1)))
 }
 
 func BenchmarkList(b *testing.B) {
