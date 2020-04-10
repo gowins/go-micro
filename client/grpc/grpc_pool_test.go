@@ -69,7 +69,7 @@ func TestGRPCPool(t *testing.T) {
 
 func TestList(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	l := newList()
+	l := newList(10)
 
 	cc, err := grpc.Dial("127.0.0.1:8080", grpc.WithInsecure())
 	g.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -91,33 +91,34 @@ func TestList(t *testing.T) {
 	t.Log("head:", *l.head, "next1:", *l.head.next)
 
 	pop := l.popFront()
-	g.Expect(l.size()).Should(gomega.Equal(uint(2)))
 	g.Expect(pop.created).Should(gomega.Equal(p.created))
 	t.Log("head:", *l.head, "next1:", *l.head.next)
+	t.Log("current:", l.current)
 
 	pop = l.popFront()
 	t.Log("pop1:", *pop)
-	g.Expect(l.size()).Should(gomega.Equal(uint(1)))
 
 	pop = l.popFront()
-	g.Expect(l.size()).Should(gomega.Equal(uint(0)))
-	g.Expect(pop.created).Should(gomega.Equal(p2.created))
+	t.Log("pop2:", *pop)
 
 	pop = l.popFront()
-	g.Expect(l.size()).Should(gomega.Equal(uint(0)))
 	g.Expect(pop).Should(gomega.BeNil())
 }
 
 func BenchmarkList(b *testing.B) {
-	l := newList()
+	l := newList(100)
 	var p *poolConn
 	for i := 0; i < b.N; i++ {
 		p = &poolConn{}
 		l.emplace(p)
 	}
-	b.Log(l.size())
+}
 
+func BenchmarkSlice(b *testing.B) {
+	s := make([]*poolConn, 0)
+	var p *poolConn
 	for i := 0; i < b.N; i++ {
-		l.popFront()
+		p = &poolConn{}
+		s = append(s, p)
 	}
 }

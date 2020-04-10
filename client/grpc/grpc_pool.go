@@ -1,7 +1,6 @@
 package grpc
 
 import (
-	"log"
 	"sync"
 	"time"
 
@@ -27,9 +26,10 @@ type poolConn struct {
 }
 
 type poolList struct {
-	count uint
-
-	head *poolConn
+	maxSize uint // 最大容量
+	count   uint // 当前容量
+	current uint // 当前指向
+	head    *poolConn
 }
 
 func newPool(size uint, ttl time.Duration) *pool {
@@ -44,25 +44,28 @@ func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) 
 	p.Lock()
 	conns, ok := p.conns[addr]
 	var conn *poolConn
+	now := time.Now().Unix()
 	if ok {
 		// existing
 		conn = conns.popFront()
-		now := time.Now().Unix()
 
 		// while we have conns check age and then return one
 		// otherwise we'll create a new conn
 		for conn != nil {
 			// 外部获取的时候检测连接状态
 			switch conn.GetState() {
-			case connectivity.Shutdown:
+			case connectivity.Connecting:
 			case connectivity.TransientFailure:
+			case connectivity.Shutdown:
 				conn.ClientConn.Close()
+				conns.erase(conn)
 				conn = conns.popFront()
 				continue
 			default:
 				// if conn is old kill it and move on
 				if d := now - conn.created; d > p.ttl {
 					conn.ClientConn.Close()
+					conns.erase(conn)
 					conn = conns.popFront()
 					continue
 				}
@@ -80,7 +83,9 @@ func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) 
 		return nil, err
 	}
 
-	conn = &poolConn{cc, uuid.New().String(), time.Now().Unix(), nil}
+	conn = &poolConn{cc, uuid.New().String(), now, nil}
+
+	p.release(addr, conn)
 
 	return conn, nil
 }
@@ -91,7 +96,7 @@ func (p *pool) release(addr string, conn *poolConn) {
 
 	conns, ok := p.conns[addr]
 	if !ok {
-		conns = newList()
+		conns = newList(p.size)
 	}
 
 	// 超过容量则丢弃
@@ -106,16 +111,21 @@ func (p *pool) release(addr string, conn *poolConn) {
 }
 
 // 链表
-func newList() *poolList {
+func newList(max uint) *poolList {
+	if max == 0 {
+		max = 100
+	}
 	return &poolList{
-		count: 0,
-		head:  nil,
+		maxSize: max,
+		count:   0,
+		current: 1,
+		head:    nil,
 	}
 }
 
 // 尾部添加新项
 func (l *poolList) emplace(node *poolConn) {
-	if node == nil {
+	if l.count == l.maxSize || node == nil {
 		return
 	}
 	node.next = nil
@@ -124,11 +134,14 @@ func (l *poolList) emplace(node *poolConn) {
 	} else {
 		end := l.head
 		isExist := false
-		for i := uint(1); i <= l.count-1; i++ {
+		for i := uint(0); i < l.count; i++ {
 			if end.id == node.id {
 				isExist = true
+				break
 			}
-			end = end.next
+			if i != l.count-1 {
+				end = end.next
+			}
 		}
 		if isExist {
 			return
@@ -136,19 +149,46 @@ func (l *poolList) emplace(node *poolConn) {
 		end.next = node
 	}
 	l.count++
-	log.Printf("pool list count: %d", l.count)
+	//log.Printf("pool list count: %d", l.count)
 }
 
-// 获取头并移除
+// 获取下一项
 func (l *poolList) popFront() *poolConn {
-	if l.count > 0 {
-		head := l.head
-		l.head = head.next
-		l.count--
-		return head
+	l.current++
+	if l.current > l.maxSize {
+		l.current = 1
+	} else if l.current > l.count+1 {
+		l.current = l.count + 1
 	}
-	log.Printf("pop front pool list count: %d", l.count)
-	return nil
+
+	current := l.head
+	for i := uint(1); i < l.current; i++ {
+		current = current.next
+	}
+
+	//log.Printf("pop front pool list current: %d, count: %d", l.current, l.count)
+	return current
+}
+
+// 移除
+func (l *poolList) erase(node *poolConn) {
+	end := l.head
+	if end.id == node.id {
+		l.head = end.next
+		l.count--
+		return
+	}
+	for i := uint(1); i < l.count; i++ {
+		if end.next.id == node.id {
+			end.next = end.next.next
+			l.count--
+			break
+		}
+		end = end.next
+	}
+	if l.current >= l.count {
+		l.current = l.count
+	}
 }
 
 func (l *poolList) size() uint {

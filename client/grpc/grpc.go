@@ -140,9 +140,6 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 		ch <- microError(err)
 	}()
 
-	// execution of release
-	g.pool.release(address, cc)
-
 	select {
 	case err := <-ch:
 		grr = err
