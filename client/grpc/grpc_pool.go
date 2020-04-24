@@ -53,8 +53,11 @@ type pool struct {
 }
 
 type poolManger struct {
-	isn   int // round robin, 解决随机分布不均匀问题
+	pool *pool
+	size int
+
 	conns map[*poolConn]struct{}
+	queue []*poolConn
 }
 
 type poolConn struct {
@@ -77,111 +80,87 @@ func newPool(size int, ttl time.Duration) *pool {
 func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) {
 	p.Lock()
 	defer p.Unlock()
-	return p.pickRandom(addr, opts...)
+	return p.pick(addr, opts...)
 }
 
-func (p *pool) pickRandom(addr string, opts ...grpc.DialOption) (*poolConn, error) {
+func (p *pool) pick(addr string, opts ...grpc.DialOption) (*poolConn, error) {
 
-	pm, ok := p.pms[addr]
+	// no pool
+	if p.size == 0 {
+		// create new conn
+		return newConn(addr, opts...)
+	}
 
-	if p.size != 0 && ok && pm != nil {
-		conns := pm.conns
+	if pm, ok := p.pms[addr]; ok && pm != nil {
 
 		// pick one at round robin
-		pm.isn++
-		if pm.isn %= p.size; pm.isn < len(conns) {
-			var i int
-			for conn := range conns {
-				if i == pm.isn {
-					// this one
-					if conn.isReady() {
-						conn.ref++
-						return conn, nil
-					}
-
-					// not ready, kick it out
-					p.removeConn(conns, conn)
-					_ = conn.Close()
-					break
-				}
-				i++
-			}
+		conn := pm.dequeue()
+		if conn == nil {
+			// create new conn
+			p.Debug("create new conn.")
+			return newConn(addr, opts...)
 		}
+
+		// this one
+		if conn.isReady() {
+			conn.ref++
+			pm.enqueue(conn)
+			return conn, nil
+		}
+
+		// not ready, kick it out
+		pm.removeConn(conn)
 	}
 
 	// create new conn
-	return p.newConn(addr, opts...)
+	p.Debug("create new conn.")
+	return newConn(addr, opts...)
 }
 
 // create new conn
-func (p *pool) newConn(addr string, opts ...grpc.DialOption) (*poolConn, error) {
+func newConn(addr string, opts ...grpc.DialOption) (*poolConn, error) {
 	opts = WithKeepaliveParams(opts...)
+
 	cc, err := grpc.Dial(addr, opts...)
 	if err != nil {
 		return nil, err
 	}
-	// just for test
-	//if pickDebugMode {
-	//	newConnNums++
-	//}
-	p.Debug("newConn")
-	return &poolConn{ClientConn: cc, ref: 1}, err
-}
 
-func (p *pool) removeConn(conns map[*poolConn]struct{}, conn *poolConn) {
-	if conns != nil && conn != nil {
-		delete(conns, conn)
-		return
-	}
-	p.Debug("removeConn err, conns:%v, conn:%v \n", conns, conn)
+	return &poolConn{ClientConn: cc, ref: 1}, err
 }
 
 func (p *pool) release(addr string, conn *poolConn, err error) {
 	p.Lock()
 	defer p.Unlock()
 
-	// 池子大小为0, 也就没有放入的必要了
+	// conn is never nil
+	conn.ref--
+
+	// no pool
 	if p.size == 0 {
 		_ = conn.Close()
 		return
 	}
 
-	// conn is never nil
-	conn.ref--
-
 	// pm may be nil
-	if _, ok := p.pms[addr]; !ok {
-		p.pms[addr] = &poolManger{conns: make(map[*poolConn]struct{})}
+	var (
+		pm *poolManger
+		ok bool
+	)
+	if pm, ok = p.pms[addr]; !ok || pm == nil {
+		pm = newPoolManger(p.size)
+		pm.pool = p
+		p.pms[addr] = pm
 	}
 
-	conns := p.pms[addr].conns
-
 	if err != nil || !conn.isReady() {
-		p.removeConn(conns, conn)
-		_ = conn.Close()
+		pm.removeConn(conn)
 		return
 	}
 
 	// otherwise put it back for reuse
-	p.putConn(conns, conn)
-
+	pm.putConn(conn)
 	return
-}
-
-func (p *pool) putConn(conns map[*poolConn]struct{}, conn *poolConn) {
-	if conns != nil && conn != nil {
-		if len(conns) < p.size {
-			p.Debug("put conn to pool")
-			conns[conn] = struct{}{}
-			return
-		}
-		// 不在连接池内并且连接池已经满了，那就释放掉
-		if _, ok := conns[conn]; !ok {
-			_ = conn.Close()
-		}
-		return
-	}
-	p.Debug("putConn err, conns:%v, conn:%v \n", conns, conn)
 }
 
 func (p *pool) Debug(a ...interface{}) {
@@ -195,12 +174,14 @@ func (p *pool) Debug(a ...interface{}) {
 	fmt.Println("[debug] ", a)
 }
 
+// ----------------------------------------------
+// poolConn
+// ----------------------------------------------
 func (cc *poolConn) isReady() bool {
-	if cc.GetState() != connectivity.Ready {
-		//if !pickDebugMode && cc.GetState() != connectivity.Ready { // just for test
-		return false
+	if cc.GetState() == connectivity.Ready {
+		return true
 	}
-	return true
+	return false
 }
 
 func (cc *poolConn) Close() error {
@@ -208,4 +189,66 @@ func (cc *poolConn) Close() error {
 		return cc.ClientConn.Close()
 	}
 	return nil
+}
+
+// ----------------------------------------------
+// poolManger
+// ----------------------------------------------
+func newPoolManger(size int) *poolManger {
+	return &poolManger{
+		size:  size,
+		conns: make(map[*poolConn]struct{}),
+		queue: make([]*poolConn, 0, 0),
+	}
+}
+
+func (pm *poolManger) enqueue(conn *poolConn) {
+	// FIFO
+	pm.queue = append(pm.queue, conn)
+}
+
+func (pm *poolManger) dequeue() *poolConn {
+	// The pool is not full yet.
+	if len(pm.conns) < pm.size {
+		return nil
+	}
+
+	// FIFO
+	for k, conn := range pm.queue {
+		if _, ok := pm.conns[conn]; ok {
+			pm.queue = pm.queue[k:]
+			return conn
+		}
+		_ = conn.Close()
+	}
+
+	if len(pm.queue) > 0 {
+		pm.pool.Debug("All connections in the queue are not available.")
+		pm.queue = make([]*poolConn, 0, 0)
+	}
+
+	return nil
+}
+
+func (pm *poolManger) removeConn(conn *poolConn) {
+	pm.pool.Debug("Remove connection.")
+	delete(pm.conns, conn)
+	_ = conn.Close()
+}
+
+func (pm *poolManger) putConn(conn *poolConn) {
+	// It already exists in the pool
+	if _, ok := pm.conns[conn]; ok {
+		return
+	}
+
+	if len(pm.conns) >= pm.size {
+		pm.pool.Debug("The pool is full, releasing excess connection")
+		_ = conn.Close()
+		return
+	}
+
+	pm.pool.Debug("Put it into the pool")
+	pm.enqueue(conn)
+	pm.conns[conn] = struct{}{}
 }

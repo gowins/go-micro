@@ -17,7 +17,7 @@ import (
 func TestGRPCPool(t *testing.T) {
 	defaultDebugMode = true
 	// Total number of requests = conns * duration/1s * 2
-	testPoolConcurrency(t, 5, "127.0.0.1:50053", 50, 2)
+	testPoolConcurrency(t, 51, "127.0.0.1:50053", 100, 2)
 }
 
 func testPoolConcurrency(t *testing.T, poolSize int, addr string, conns int, duration int) {
@@ -36,7 +36,10 @@ func testPoolConcurrency(t *testing.T, poolSize int, addr string, conns int, dur
 	if len(p.pms[addr].conns) != poolSize {
 		t.Fatalf("池子没有被塞满,当前池子大小: %d \n", len(p.pms[addr].conns))
 	}
+	fmt.Println("netstat -an | grep 50053 |grep ESTABLISHED | wc -l", "数量应该为size的两倍", poolSize*2)
 	fmt.Println("连接池已塞满")
+	time.Sleep(time.Second * 5)
+
 }
 
 func invokeConcurrency(t *testing.T, p *pool, addr string, conns int, duration int, withErr bool) {
