@@ -66,6 +66,7 @@ require (
 	github.com/sirupsen/logrus v1.4.2 // indirect
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
+	github.com/uber-go/atomic v0.0.0-00010101000000-000000000000
 	go.opencensus.io v0.22.0 // indirect
 	golang.org/x/crypto v0.0.0-20190618222545-ea8f1a30c443
 	golang.org/x/exp v0.0.0-20190510132918-efd6b22b2522 // indirect
@@ -84,3 +85,5 @@ require (
 	gopkg.in/telegram-bot-api.v4 v4.6.4
 	honnef.co/go/tools v0.0.0-20190614002413-cb51c254f01b // indirect
 )
+
+replace github.com/uber-go/atomic => github.com/uber-go/atomic v1.4.0

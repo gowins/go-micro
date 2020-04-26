@@ -1,0 +1,201 @@
+package grpc
+
+import (
+	"sync"
+	"time"
+
+	"google.golang.org/grpc"
+
+	"github.com/micro/go-micro/util/log"
+
+	"google.golang.org/grpc/connectivity"
+
+	"github.com/uber-go/atomic"
+)
+
+const (
+	requestPerConn = 8
+)
+
+type poolManager struct {
+	sync.Mutex
+
+	// 管理当前可选的连接
+	indexes []*poolConn
+
+	// 真实可用的连接
+	data map[*poolConn]struct{}
+
+	// 真实 pool 的大小，也就是最大池子长度
+	size int
+
+	// 连接有效期
+	ttl int64
+
+	// 连接地址
+	addr string
+
+	updatedAt time.Time
+
+	c atomic.Int32
+}
+
+func newManager(addr string, size int, ttl int64) *poolManager {
+	manager := &poolManager{
+		indexes: make([]*poolConn, 0, 0),
+		data:    make(map[*poolConn]struct{}),
+		size:    size,
+		ttl:     ttl,
+		addr:    addr,
+	}
+
+	return manager
+}
+
+func (m *poolManager) isValid(conn *poolConn) int {
+	// 无效 1
+	if conn == nil {
+		return 0
+	}
+
+	// 无效 2
+	// 已经从真实数据中移除
+	if _, ok := m.data[conn]; !ok {
+		return 0
+	}
+
+	// 无效 3
+	// 已经过期
+	now := time.Now().Unix()
+	if (now - conn.created) >= m.ttl {
+		return 0
+	}
+
+	// 无效 4
+	// 如果连接状态都不可用了则直接是无效连接
+	if conn.GetState() != connectivity.Ready {
+		return 0
+	}
+
+	// ===================================================================
+	// 有效 1
+	// 如果池子已经到达了上限了，那么只要此连接状态是可用的，就认为是有效的连接
+	if len(m.data) >= m.size {
+		return 2
+	}
+	// 有效 2
+	// 如果池子还没有满，但是当前连接已经到达了每个连接上承载的请求数时，认为些连接无效
+	if conn.refCount < requestPerConn {
+		return 3
+	} else {
+		return 4
+	}
+	// ===================================================================
+
+	// 其它情况均为无效
+	return 0
+}
+
+func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
+	m.Lock()
+	m.updatedAt = time.Now() // 更新最后使用时间
+
+	for idx, conn := range m.indexes {
+		// 直接移除，下一个请求直接不再选择
+		// 标识可关闭
+		if state := m.isValid(conn); state == 0 {
+			// TODO
+			conn.closable = true
+			delete(m.data, conn)
+			continue
+		} else if state == 4 {
+			continue
+		}
+
+		// 在返回前处理下索引对象，将其移动到最末尾
+		m.indexes = m.indexes[idx+1:]
+		m.indexes = append(m.indexes, conn)
+
+		// 增加当前连接的引用计数
+		conn.refCount++
+		println(conn, "=======>", conn.refCount)
+		m.Unlock()
+
+		return conn, nil
+	}
+
+	m.Unlock()
+	// 如果从 manager 中找不到可用的连接时，新建一个连接
+	cc, err := grpc.Dial(m.addr, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	m.c.Inc()
+
+	conn := &poolConn{ClientConn: cc, created: time.Now().Unix(), refCount: 1, closable: false}
+
+	return conn, nil
+}
+
+func (m *poolManager) put(conn *poolConn, err error) {
+	m.Lock()
+	defer m.Unlock()
+
+	if conn == nil {
+		return
+	}
+
+	conn.refCount--
+
+	// 1. 任何一次请求错误了就从连接池中移除，并且标识存在失败过
+	// 标识可关闭
+	if err != nil {
+		conn.closable = true
+		println("closable 1")
+		delete(m.data, conn)
+	}
+
+	// 2. 如果池子里已经满了则应该可关闭
+	if _, ok := m.data[conn]; !ok && len(m.data) >= m.size {
+		println("closable 2")
+		conn.closable = true
+	}
+
+	// 如果已经失败过，要执行后续处理
+	if conn.closable {
+		// 判断 refCount 是否为 0， 如果为 0 则直接关闭了
+		if conn.refCount <= 0 {
+			if err := conn.ClientConn.Close(); err != nil {
+				log.Log("poolManager:", err)
+			}
+		}
+
+		return
+	}
+
+	// 如果不在池子里，池子也不满则放入池子，并且开始复用
+	if _, ok := m.data[conn]; !ok {
+		// 因为如果下一个选择还是会判断是否有效的，这里加入可提前让连接复用
+		m.indexes = append(m.indexes, conn)
+		m.data[conn] = struct{}{}
+	}
+}
+
+func (m *poolManager) cleanup() bool {
+	m.Lock()
+	defer m.Unlock()
+
+	if time.Now().Sub(m.updatedAt) < time.Minute*30 {
+		return false
+	}
+
+	for conn := range m.data {
+		if conn.refCount > 0 {
+			log.Log("invalid: conn haven't been closed. ", m.addr)
+		}
+		_ = conn.ClientConn.Close()
+	}
+
+	return true
+}
