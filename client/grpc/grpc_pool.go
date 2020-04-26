@@ -12,72 +12,63 @@ type pool struct {
 	ttl  int64
 
 	sync.Mutex
-	conns map[string][]*poolConn
+	conns map[string]*poolManager
 }
 
 type poolConn struct {
 	*grpc.ClientConn
-	created int64
+	created  int64
+	refCount int64
+	closable bool
 }
 
 func newPool(size int, ttl time.Duration) *pool {
-	return &pool{
+	pool := &pool{
 		size:  size,
 		ttl:   int64(ttl.Seconds()),
-		conns: make(map[string][]*poolConn),
+		conns: make(map[string]*poolManager),
 	}
+
+	go pool.cleanup()
+
+	return pool
 }
 
 func (p *pool) getConn(addr string, opts ...grpc.DialOption) (*poolConn, error) {
-	p.Lock()
-	conns := p.conns[addr]
-	now := time.Now().Unix()
-
-	// while we have conns check age and then return one
-	// otherwise we'll create a new conn
-	for len(conns) > 0 {
-		conn := conns[len(conns)-1]
-		conns = conns[:len(conns)-1]
-		p.conns[addr] = conns
-
-		// if conn is old kill it and move on
-		if d := now - conn.created; d > p.ttl {
-			conn.ClientConn.Close()
-			continue
-		}
-
-		// we got a good conn, lets unlock and return it
-		p.Unlock()
-
-		return conn, nil
-	}
-
-	p.Unlock()
-
-	// create new conn
-	cc, err := grpc.Dial(addr, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	return &poolConn{cc, time.Now().Unix()}, nil
+	return p.getManager(addr).get(opts...)
 }
 
 func (p *pool) release(addr string, conn *poolConn, err error) {
-	// don't store the conn if it has errored
-	if err != nil {
-		conn.ClientConn.Close()
-		return
+	// otherwise put it back for reuse
+	p.getManager(addr).put(conn, err)
+}
+
+func (p *pool) getManager(addr string) *poolManager {
+	p.Lock()
+	defer p.Unlock()
+
+	manager := p.conns[addr]
+	if manager == nil {
+		manager = newManager(addr, p.size, p.ttl)
+		p.conns[addr] = manager
 	}
 
-	// otherwise put it back for reuse
-	p.Lock()
-	conns := p.conns[addr]
-	if len(conns) >= p.size {
+	return manager
+}
+
+func (p *pool) cleanup() {
+	timer := time.NewTicker(time.Minute * 10)
+	for range timer.C {
+		p.Lock()
+		snapshots := p.conns
 		p.Unlock()
-		conn.ClientConn.Close()
-		return
+
+		for addr, manager := range snapshots {
+			if manager.cleanup() {
+				p.Lock()
+				delete(p.conns, addr)
+				p.Unlock()
+			}
+		}
 	}
-	p.conns[addr] = append(conns, conn)
-	p.Unlock()
 }
