@@ -49,17 +49,23 @@ func Test_poolManager_get(t *testing.T) {
 			}()
 		}
 
-		println("----------------")
-
 		if i < 99 {
 			break
 		}
+
+		ch <- struct{}{}
+
+		println("##########")
 	}
 
 	wg.Wait()
 
 	fmt.Println("len ", len(pmgr.data))
 	fmt.Println("created ", pmgr.c.Load())
+
+	for conn := range pmgr.data {
+		fmt.Println("refConn ", conn.refCount)
+	}
 }
 
 func invoke(pmgr *poolManager, t *testing.T) {

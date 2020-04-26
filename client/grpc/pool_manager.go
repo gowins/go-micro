@@ -40,6 +40,15 @@ type poolManager struct {
 	c atomic.Int32
 }
 
+type connState uint8
+
+const (
+	invalid connState = iota
+	poolFull
+	lessThanRef
+	moreThanRef
+)
+
 func newManager(addr string, size int, ttl int64) *poolManager {
 	manager := &poolManager{
 		indexes: make([]*poolConn, 0, 0),
@@ -52,48 +61,48 @@ func newManager(addr string, size int, ttl int64) *poolManager {
 	return manager
 }
 
-func (m *poolManager) isValid(conn *poolConn) int {
+func (m *poolManager) isValid(conn *poolConn) connState {
 	// 无效 1
 	if conn == nil {
-		return 0
+		return invalid
 	}
 
 	// 无效 2
 	// 已经从真实数据中移除
 	if _, ok := m.data[conn]; !ok {
-		return 0
+		return invalid
 	}
 
 	// 无效 3
 	// 已经过期
 	now := time.Now().Unix()
 	if (now - conn.created) >= m.ttl {
-		return 0
+		return invalid
 	}
 
 	// 无效 4
 	// 如果连接状态都不可用了则直接是无效连接
 	if conn.GetState() != connectivity.Ready {
-		return 0
+		return invalid
 	}
 
 	// ===================================================================
 	// 有效 1
 	// 如果池子已经到达了上限了，那么只要此连接状态是可用的，就认为是有效的连接
 	if len(m.data) >= m.size {
-		return 2
+		return poolFull
 	}
 	// 有效 2
 	// 如果池子还没有满，但是当前连接已经到达了每个连接上承载的请求数时，认为些连接无效
 	if conn.refCount < requestPerConn {
-		return 3
+		return lessThanRef
 	} else {
-		return 4
+		return moreThanRef
 	}
 	// ===================================================================
 
 	// 其它情况均为无效
-	return 0
+	return invalid
 }
 
 func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
@@ -103,12 +112,13 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 	for idx, conn := range m.indexes {
 		// 直接移除，下一个请求直接不再选择
 		// 标识可关闭
-		if state := m.isValid(conn); state == 0 {
+		state := m.isValid(conn)
+		if state == invalid {
 			// TODO
 			conn.closable = true
 			delete(m.data, conn)
 			continue
-		} else if state == 4 {
+		} else if state == moreThanRef {
 			continue
 		}
 
