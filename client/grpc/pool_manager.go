@@ -111,7 +111,7 @@ func (m *poolManager) isValid(conn *poolConn) connState {
 }
 
 func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
-	conn, found := m.tryFindReuse()
+	conn, found := m.tryFindOne()
 	if found {
 		return conn, nil
 	}
@@ -126,7 +126,7 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 
 	go func() {
 		<-m.tickers
-		conn, found := m.tryFindReuse()
+		conn, found := m.tryFindOne()
 		if found {
 			m.tickers <- struct{}{}
 			ch <- &pair{conn, nil}
@@ -144,7 +144,7 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 	}
 }
 
-func (m *poolManager) tryFindReuse() (*poolConn, bool) {
+func (m *poolManager) tryFindOne() (*poolConn, bool) {
 	m.Lock()
 	defer m.Unlock()
 	m.updatedAt = time.Now() // 更新最后使用时间
@@ -176,7 +176,7 @@ func (m *poolManager) tryFindReuse() (*poolConn, bool) {
 }
 
 func (m *poolManager) create(opts ...grpc.DialOption) (*poolConn, error) {
-	conn, found := m.tryFindReuse()
+	conn, found := m.tryFindOne()
 	if found {
 		return conn, nil
 	}
