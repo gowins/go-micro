@@ -225,7 +225,7 @@ func (m *poolManager) put(conn *poolConn, err error) {
 	// 如果池子里已经满了则应该可关闭
 	// 如果不在池子里，池子也不满则放入池子，并且开始复用
 	_, inPool := m.data[conn]
-	if inPool {
+	if !inPool {
 		if len(m.data) >= m.size {
 			conn.closable = true
 		} else {
