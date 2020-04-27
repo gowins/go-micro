@@ -34,7 +34,7 @@ type poolManager struct {
 	// 最后使用时间
 	updatedAt time.Time
 	//
-	tickers chan struct{}
+	tickets ticket
 	//
 	c atomic.Int32
 }
@@ -46,7 +46,6 @@ const (
 	poolFull
 	lessThanRef
 	moreThanRef
-	exceededTTL
 )
 
 func newManager(addr string, size int, ttl int64) *poolManager {
@@ -57,11 +56,7 @@ func newManager(addr string, size int, ttl int64) *poolManager {
 		size:    size,
 		ttl:     ttl,
 		addr:    addr,
-		tickers: make(chan struct{}, tickerCount),
-	}
-
-	for i := 0; i < tickerCount; i++ {
-		manager.tickers <- struct{}{}
+		tickets: newTicker(tickerCount),
 	}
 
 	return manager
@@ -125,25 +120,38 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 	ch := make(chan *pair, 1)
 
 	go func() {
-		<-m.tickers
+		// 获取门票
+		m.tickets.get()
+
+		// 1. 再次确认是否已经真的没有连接可用了
 		conn, found := m.tryFindOne()
 		if found {
-			m.tickers <- struct{}{}
 			ch <- &pair{conn, nil}
 			return
 		}
+
+		// 2. 真的没有连接可用的时间，这时新建连接
 		conn, err := m.create(opts...)
 		ch <- &pair{conn, err}
 	}()
 
 	select {
 	case p := <-ch:
+		// 老连接直接放票
+		// 如果是新建连接则要等处理完一次请求后再放票
+		if !p.conn.newCreated {
+			m.tickets.release()
+		}
+
 		return p.conn, p.err
 	case <-ctx.Done():
+		// 超时放票
+		m.tickets.release()
 		return nil, fmt.Errorf("create new connection timeout. ")
 	}
 }
 
+// tryFindOne 偿试找一个可用的连接
 func (m *poolManager) tryFindOne() (*poolConn, bool) {
 	m.Lock()
 	defer m.Unlock()
@@ -154,9 +162,8 @@ func (m *poolManager) tryFindOne() (*poolConn, bool) {
 		// 标识可关闭
 		state := m.isValid(conn)
 		if state == invalid {
-			// TODO
 			conn.closable = true
-			delete(m.data, conn)
+			m.tryClose(conn)
 			continue
 		} else if state == moreThanRef {
 			continue
@@ -168,7 +175,6 @@ func (m *poolManager) tryFindOne() (*poolConn, bool) {
 
 		// 增加当前连接的引用计数
 		conn.refCount++
-		println(conn, "=====>", conn.refCount)
 		return conn, true
 	}
 
@@ -176,18 +182,20 @@ func (m *poolManager) tryFindOne() (*poolConn, bool) {
 }
 
 func (m *poolManager) create(opts ...grpc.DialOption) (*poolConn, error) {
-	conn, found := m.tryFindOne()
-	if found {
-		return conn, nil
-	}
-
 	// 如果从 manager 中找不到可用的连接时，新建一个连接
 	cc, err := grpc.Dial(m.addr, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	conn = &poolConn{ClientConn: cc, created: time.Now(), refCount: 1, closable: false}
+	conn := &poolConn{
+		ClientConn: cc,
+		newCreated: true,
+		created:    time.Now(),
+		refCount:   1,
+		closable:   false,
+		closed:     false,
+	}
 	m.c.Inc()
 	return conn, nil
 }
@@ -200,45 +208,58 @@ func (m *poolManager) put(conn *poolConn, err error) {
 		return
 	}
 
+	if conn.newCreated {
+		conn.newCreated = false
+		m.tickets.release()
+	}
+
 	conn.refCount--
 
 	// 1. 任何一次请求错误了就从连接池中移除，并且标识存在失败过
 	// 标识可关闭
 	if err != nil {
 		conn.closable = true
-		delete(m.data, conn)
 	}
 
-	// 2. 如果池子里已经满了则应该可关闭
-	if _, ok := m.data[conn]; !ok && len(m.data) >= m.size {
-		conn.closable = true
+	// 2.
+	// 如果池子里已经满了则应该可关闭
+	// 如果不在池子里，池子也不满则放入池子，并且开始复用
+	_, inPool := m.data[conn]
+	if inPool {
+		if len(m.data) >= m.size {
+			conn.closable = true
+		} else {
+			// 因为如果下一个选择还是会判断是否有效的，这里加入可提前让连接复用
+			m.indexes = append(m.indexes, conn)
+			m.data[conn] = struct{}{}
+		}
 	}
 
 	// 如果已经失败过，要执行后续处理
 	if conn.closable {
-		// 判断 refCount 是否为 0， 如果为 0 则直接关闭了
-		if conn.refCount <= 0 {
-			if err := conn.ClientConn.Close(); err != nil {
-				log.Log("poolManager:", err)
-			}
-		}
-
+		m.tryClose(conn)
 		return
-	}
-
-	// 如果不在池子里，池子也不满则放入池子，并且开始复用
-	if _, ok := m.data[conn]; !ok {
-		// 因为如果下一个选择还是会判断是否有效的，这里加入可提前让连接复用
-		m.indexes = append(m.indexes, conn)
-		m.data[conn] = struct{}{}
-		println("release ticker.")
-		m.tickers <- struct{}{}
-		println("ticker len: ", len(m.tickers))
 	}
 
 	return
 }
 
+// tryClose 偿试关闭可关闭的连接
+func (m *poolManager) tryClose(conn *poolConn) {
+	// 1. 从连接管理中移除，不让下一个选中
+	delete(m.data, conn)
+
+	// 2. 判断 refCount 是否为 0， 如果为 0 则直接关闭了
+	if conn.refCount <= 0 && !conn.closed {
+		conn.closed = true
+
+		if err := conn.ClientConn.Close(); err != nil {
+			log.Log("poolManager:", err)
+		}
+	}
+}
+
+// cleanup 定时清理无用的连接
 func (m *poolManager) cleanup() bool {
 	m.Lock()
 	defer m.Unlock()
@@ -255,4 +276,31 @@ func (m *poolManager) cleanup() bool {
 	}
 
 	return true
+}
+
+// ticket 门票概念
+type ticket chan struct{}
+
+func newTicker(size int) ticket {
+	tks := make(ticket, size)
+
+	for i := 0; i < size; i++ {
+		tks <- struct{}{}
+	}
+
+	return tks
+}
+
+func (t ticket) get() {
+	<-t
+	println("size after get: ", t.size())
+}
+
+func (t ticket) release() {
+	t <- struct{}{}
+	println("size after release: ", t.size())
+}
+
+func (t ticket) size() int {
+	return len(t)
 }

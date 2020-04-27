@@ -85,3 +85,15 @@ func invoke(pmgr *poolManager, t *testing.T) {
 	}
 	pmgr.put(conn, err)
 }
+
+func ExampleTicketGet() {
+	tickets := newTicker(10)
+	tickets.get()
+	fmt.Println(tickets.size())
+	tickets.release()
+	fmt.Println(tickets.size())
+
+	// Output:
+	// 9
+	// 10
+}
