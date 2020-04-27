@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uber-go/atomic"
 	"google.golang.org/grpc"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 )
@@ -26,17 +27,11 @@ func Test_poolManager_get(t *testing.T) {
 		}
 	}()
 
-	pmgr := newManager("127.0.0.1:50054", 5, int64(time.Second*10))
-	ch := make(chan struct{})
-	go func() {
-		time.Sleep(time.Second)
-		ch <- struct{}{}
-	}()
-	for i := 0; i < 100; i++ {
-		<-ch
-		c := 200
-		wg.Add(c)
+	pmgr := newManager("127.0.0.1:50054", 10, 10)
+	c := 200
+	for i := 0; i < 20; i++ {
 		for j := 0; j < c; j++ {
+			wg.Add(1)
 			go func() {
 				defer wg.Done()
 
@@ -49,26 +44,31 @@ func Test_poolManager_get(t *testing.T) {
 			}()
 		}
 
-		if i < 99 {
-			break
-		}
-
-		ch <- struct{}{}
-
-		println("##########")
+		time.Sleep(time.Second)
 	}
 
 	wg.Wait()
 
 	fmt.Println("len ", len(pmgr.data))
 	fmt.Println("created ", pmgr.c.Load())
+	fmt.Println("req ", req.Load())
+	fmt.Println("req t", reqt.Load())
+	fmt.Println("req / per", reqt.Load()/req.Load())
 
 	for conn := range pmgr.data {
 		fmt.Println("refConn ", conn.refCount)
 	}
 }
 
+var req atomic.Int64
+var reqt atomic.Int64
+
 func invoke(pmgr *poolManager, t *testing.T) {
+	now := time.Now()
+	defer func() {
+		req.Add(1)
+		reqt.Add(time.Since(now).Nanoseconds())
+	}()
 	conn, err := pmgr.get(grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)

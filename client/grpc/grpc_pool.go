@@ -17,7 +17,7 @@ type pool struct {
 
 type poolConn struct {
 	*grpc.ClientConn
-	created  int64
+	created  time.Time
 	refCount int64
 	closable bool
 }
