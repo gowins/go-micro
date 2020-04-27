@@ -1,16 +1,17 @@
 package grpc
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/uber-go/atomic"
 	"google.golang.org/grpc"
 
 	"github.com/micro/go-micro/util/log"
 
 	"google.golang.org/grpc/connectivity"
-
-	"github.com/uber-go/atomic"
 )
 
 const (
@@ -22,21 +23,19 @@ type poolManager struct {
 
 	// 管理当前可选的连接
 	indexes []*poolConn
-
 	// 真实可用的连接
 	data map[*poolConn]struct{}
-
 	// 真实 pool 的大小，也就是最大池子长度
 	size int
-
 	// 连接有效期
 	ttl int64
-
 	// 连接地址
 	addr string
-
+	// 最后使用时间
 	updatedAt time.Time
-
+	//
+	tickers chan struct{}
+	//
 	c atomic.Int32
 }
 
@@ -47,15 +46,22 @@ const (
 	poolFull
 	lessThanRef
 	moreThanRef
+	exceededTTL
 )
 
 func newManager(addr string, size int, ttl int64) *poolManager {
+	tickerCount := size
 	manager := &poolManager{
 		indexes: make([]*poolConn, 0, 0),
 		data:    make(map[*poolConn]struct{}),
 		size:    size,
 		ttl:     ttl,
 		addr:    addr,
+		tickers: make(chan struct{}, tickerCount),
+	}
+
+	for i := 0; i < tickerCount; i++ {
+		manager.tickers <- struct{}{}
 	}
 
 	return manager
@@ -75,8 +81,7 @@ func (m *poolManager) isValid(conn *poolConn) connState {
 
 	// 无效 3
 	// 已经过期
-	now := time.Now().Unix()
-	if (now - conn.created) >= m.ttl {
+	if int64(time.Since(conn.created).Seconds()) >= m.ttl {
 		return invalid
 	}
 
@@ -106,7 +111,42 @@ func (m *poolManager) isValid(conn *poolConn) connState {
 }
 
 func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
+	conn, found := m.tryFindReuse()
+	if found {
+		return conn, nil
+	}
+
+	type pair struct {
+		conn *poolConn
+		err  error
+	}
+
+	ctx, _ := context.WithTimeout(context.Background(), time.Second*2)
+	ch := make(chan *pair, 1)
+
+	go func() {
+		<-m.tickers
+		conn, found := m.tryFindReuse()
+		if found {
+			m.tickers <- struct{}{}
+			ch <- &pair{conn, nil}
+			return
+		}
+		conn, err := m.create(opts...)
+		ch <- &pair{conn, err}
+	}()
+
+	select {
+	case p := <-ch:
+		return p.conn, p.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("create new connection timeout. ")
+	}
+}
+
+func (m *poolManager) tryFindReuse() (*poolConn, bool) {
 	m.Lock()
+	defer m.Unlock()
 	m.updatedAt = time.Now() // 更新最后使用时间
 
 	for idx, conn := range m.indexes {
@@ -128,23 +168,27 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 
 		// 增加当前连接的引用计数
 		conn.refCount++
-		println(conn, "=======>", conn.refCount)
-		m.Unlock()
+		println(conn, "=====>", conn.refCount)
+		return conn, true
+	}
 
+	return nil, false
+}
+
+func (m *poolManager) create(opts ...grpc.DialOption) (*poolConn, error) {
+	conn, found := m.tryFindReuse()
+	if found {
 		return conn, nil
 	}
 
-	m.Unlock()
 	// 如果从 manager 中找不到可用的连接时，新建一个连接
 	cc, err := grpc.Dial(m.addr, opts...)
 	if err != nil {
 		return nil, err
 	}
 
+	conn = &poolConn{ClientConn: cc, created: time.Now(), refCount: 1, closable: false}
 	m.c.Inc()
-
-	conn := &poolConn{ClientConn: cc, created: time.Now().Unix(), refCount: 1, closable: false}
-
 	return conn, nil
 }
 
@@ -162,13 +206,11 @@ func (m *poolManager) put(conn *poolConn, err error) {
 	// 标识可关闭
 	if err != nil {
 		conn.closable = true
-		println("closable 1")
 		delete(m.data, conn)
 	}
 
 	// 2. 如果池子里已经满了则应该可关闭
 	if _, ok := m.data[conn]; !ok && len(m.data) >= m.size {
-		println("closable 2")
 		conn.closable = true
 	}
 
@@ -189,7 +231,12 @@ func (m *poolManager) put(conn *poolConn, err error) {
 		// 因为如果下一个选择还是会判断是否有效的，这里加入可提前让连接复用
 		m.indexes = append(m.indexes, conn)
 		m.data[conn] = struct{}{}
+		println("release ticker.")
+		m.tickers <- struct{}{}
+		println("ticker len: ", len(m.tickers))
 	}
+
+	return
 }
 
 func (m *poolManager) cleanup() bool {
