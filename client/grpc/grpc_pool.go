@@ -17,9 +17,17 @@ type pool struct {
 
 type poolConn struct {
 	*grpc.ClientConn
-	created  time.Time
+
+	// 创建状态
+	newCreated bool
+	created    time.Time
+
+	// 使用中的引用计数
 	refCount int64
+
+	// 用来决定是否关闭
 	closable bool
+	closed   bool
 }
 
 func newPool(size int, ttl time.Duration) *pool {
