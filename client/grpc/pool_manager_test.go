@@ -28,8 +28,8 @@ func Test_poolManager_get(t *testing.T) {
 	}()
 
 	pmgr := newManager("127.0.0.1:50054", 10, 10)
-	c := 200
-	for i := 0; i < 20; i++ {
+	c := 2000
+	for i := 0; i < 30; i++ {
 		for j := 0; j < c; j++ {
 			wg.Add(1)
 			go func() {
