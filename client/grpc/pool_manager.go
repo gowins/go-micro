@@ -175,6 +175,7 @@ func (m *poolManager) tryFindOne() (*poolConn, bool) {
 
 		// 增加当前连接的引用计数
 		conn.refCount++
+		println(conn, "==============>", conn.refCount)
 		return conn, true
 	}
 
@@ -228,10 +229,6 @@ func (m *poolManager) put(conn *poolConn, err error) {
 	if !inPool {
 		if len(m.data) >= m.size {
 			conn.closable = true
-		} else {
-			// 因为如果下一个选择还是会判断是否有效的，这里加入可提前让连接复用
-			m.indexes = append(m.indexes, conn)
-			m.data[conn] = struct{}{}
 		}
 	}
 
@@ -239,6 +236,13 @@ func (m *poolManager) put(conn *poolConn, err error) {
 	if conn.closable {
 		m.tryClose(conn)
 		return
+	}
+
+	// 二次判断的原因是因为前面可能是 closable 的状态
+	if !inPool {
+		// 因为如果下一个选择还是会判断是否有效的，这里加入可提前让连接复用
+		m.indexes = append(m.indexes, conn)
+		m.data[conn] = struct{}{}
 	}
 
 	return
