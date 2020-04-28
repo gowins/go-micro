@@ -1,27 +1,25 @@
 package grpc
 
 import (
-	"context"
-	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
-	"github.com/micro/go-micro/util/log"
 	"github.com/uber-go/atomic"
 
+	"github.com/micro/go-micro/util/log"
+
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
-	"google.golang.org/grpc/status"
 )
 
 const (
+	// 闲时每个连接处理的请求
 	requestPerConn = 8
-)
-
-var (
-	canceledErr         = status.Errorf(codes.DeadlineExceeded, context.Canceled.Error())
-	deadlineExceededErr = status.Errorf(codes.Canceled, context.DeadlineExceeded.Error())
+	// 多久可以清理连接
+	cleanupDuration = time.Minute * 30
+	// 随机打散的范围
+	randCreatedIn = 60
 )
 
 type poolManager struct {
@@ -39,9 +37,9 @@ type poolManager struct {
 	addr string
 	// 最后使用时间
 	updatedAt time.Time
-	//
+	// 创建连接的门票
 	tickets ticket
-	//
+	// 创建连接数
 	c atomic.Int32
 }
 
@@ -117,44 +115,20 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 		return conn, nil
 	}
 
-	type pair struct {
-		conn *poolConn
-		err  error
-	}
+	// 获取门票
+	m.tickets.get()
 
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*2)
-	ch := make(chan *pair, 1)
-
-	go func() {
-		// 获取门票
-		m.tickets.get()
-
-		// 1. 再次确认是否已经真的没有连接可用了
-		conn, found := m.tryFindOne()
-		if found {
-			ch <- &pair{conn, nil}
-			return
-		}
-
-		// 2. 真的没有连接可用的时间，这时新建连接
-		conn, err := m.create(opts...)
-		ch <- &pair{conn, err}
-	}()
-
-	select {
-	case p := <-ch:
+	// 1. 再次确认是否已经真的没有连接可用了
+	conn, found = m.tryFindOne()
+	if found {
 		// 老连接直接放票
 		// 如果是新建连接则要等处理完一次请求后再放票
-		if !p.conn.newCreated {
-			m.tickets.release()
-		}
-
-		return p.conn, p.err
-	case <-ctx.Done():
-		// 超时放票
 		m.tickets.release()
-		return nil, fmt.Errorf("create new connection timeout. ")
+		return conn, nil
 	}
+
+	// 2. 真的没有连接可用的时间，这时新建连接
+	return m.create(opts...)
 }
 
 // tryFindOne 偿试找一个可用的连接
@@ -198,13 +172,19 @@ func (m *poolManager) create(opts ...grpc.DialOption) (*poolConn, error) {
 	conn := &poolConn{
 		ClientConn: cc,
 		newCreated: true,
-		created:    time.Now(),
+		created:    m.backoff(cc), // 打乱时长
 		refCount:   1,
 		closable:   false,
 		closed:     false,
 	}
 	m.c.Inc()
 	return conn, nil
+}
+
+// backoff 计算一个连接平均值，防止一直在某个时间点全部失效
+func (m *poolManager) backoff(cc *grpc.ClientConn) time.Time {
+	p := uint(uintptr(unsafe.Pointer(cc))) % randCreatedIn
+	return time.Now().Add(time.Second * time.Duration(p))
 }
 
 func (m *poolManager) put(conn *poolConn, err error) {
@@ -222,12 +202,8 @@ func (m *poolManager) put(conn *poolConn, err error) {
 
 	conn.refCount--
 
-	// 1. 任何一次请求错误(非特定两个错误)了就从连接池中移除，并且标识存在失败过
-	// 标识可关闭
-	if err != nil &&
-		err.Error() != canceledErr.Error() &&
-		err.Error() != deadlineExceededErr.Error() {
-
+	// 1. 任何一次请求错误就从连接池中移除，并且标识可关闭
+	if err != nil {
 		conn.closable = true
 	}
 
@@ -280,7 +256,7 @@ func (m *poolManager) cleanup() bool {
 	m.Lock()
 	defer m.Unlock()
 
-	if time.Now().Sub(m.updatedAt) < time.Minute*30 {
+	if time.Since(m.updatedAt) < cleanupDuration {
 		return false
 	}
 
