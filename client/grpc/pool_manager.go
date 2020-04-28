@@ -1,13 +1,12 @@
 package grpc
 
 import (
+	"fmt"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/uber-go/atomic"
-
-	"github.com/micro/go-micro/util/log"
+	"github.com/micro/go-micro/client/grpc/internal/tracer"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
@@ -39,8 +38,6 @@ type poolManager struct {
 	updatedAt time.Time
 	// 创建连接的门票
 	tickets ticket
-	// 创建连接数
-	c atomic.Int32
 }
 
 type connState uint8
@@ -110,8 +107,10 @@ func (m *poolManager) isValid(conn *poolConn) connState {
 }
 
 func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
+	tracer.AddTrace("[get]", m.addr)
 	conn, found := m.tryFindOne()
 	if found {
+		tracer.AddTrace("[get] got connection at 1 : ", m.addr)
 		return conn, nil
 	}
 
@@ -124,9 +123,11 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 		// 老连接直接放票
 		// 如果是新建连接则要等处理完一次请求后再放票
 		m.tickets.release()
+		tracer.AddTrace("[get] got connection at 2 : ", m.addr)
 		return conn, nil
 	}
 
+	tracer.AddTrace("[get] got connection at 3 : ", m.addr)
 	// 2. 真的没有连接可用的时间，这时新建连接
 	return m.create(opts...)
 }
@@ -155,7 +156,8 @@ func (m *poolManager) tryFindOne() (*poolConn, bool) {
 
 		// 增加当前连接的引用计数
 		conn.refCount++
-		println(conn, "==============>", conn.refCount)
+
+		tracer.AddTrace(conn, "=============>", conn.refCount)
 		return conn, true
 	}
 
@@ -166,6 +168,7 @@ func (m *poolManager) create(opts ...grpc.DialOption) (*poolConn, error) {
 	// 如果从 manager 中找不到可用的连接时，新建一个连接
 	cc, err := grpc.Dial(m.addr, opts...)
 	if err != nil {
+		tracer.AddTrace("dial error: ", "addr is: ", m.addr)
 		return nil, err
 	}
 
@@ -175,15 +178,19 @@ func (m *poolManager) create(opts ...grpc.DialOption) (*poolConn, error) {
 		created:    m.backoff(cc), // 打乱时长
 		refCount:   1,
 		closable:   false,
-		closed:     false,
 	}
-	m.c.Inc()
+
+	tracer.Inc(m.addr)
+
 	return conn, nil
 }
 
 // backoff 计算一个连接平均值，防止一直在某个时间点全部失效
 func (m *poolManager) backoff(cc *grpc.ClientConn) time.Time {
 	p := uint(uintptr(unsafe.Pointer(cc))) % randCreatedIn
+
+	tracer.AddTrace(fmt.Sprintf("[backoff] %s new backoff is: %v", m.addr, p))
+
 	return time.Now().Add(time.Second * time.Duration(p))
 }
 
@@ -197,6 +204,7 @@ func (m *poolManager) put(conn *poolConn, err error) {
 
 	if conn.newCreated {
 		conn.newCreated = false
+		tracer.AddTrace("[put] new created release ticket: ", m.addr, err)
 		m.tickets.release()
 	}
 
@@ -205,6 +213,7 @@ func (m *poolManager) put(conn *poolConn, err error) {
 	// 1. 任何一次请求错误就从连接池中移除，并且标识可关闭
 	if err != nil {
 		conn.closable = true
+		tracer.AddTrace("[put] got error: ", m.addr, err)
 	}
 
 	// 2.
@@ -214,6 +223,7 @@ func (m *poolManager) put(conn *poolConn, err error) {
 	if !inPool {
 		if len(m.data) >= m.size {
 			conn.closable = true
+			tracer.AddTrace("[put] pool is full.", m.addr, err)
 		}
 	}
 
@@ -235,17 +245,17 @@ func (m *poolManager) put(conn *poolConn, err error) {
 
 // tryClose 偿试关闭可关闭的连接
 func (m *poolManager) tryClose(conn *poolConn) {
+	tracer.AddTrace("[tryClose] close client connection:", conn)
+
 	// 1. 从连接管理中移除，不让下一个选中
 	delete(m.data, conn)
 
 	// 2. 判断 refCount 是否为 0， 如果为 0 则直接关闭了
-	if conn.refCount <= 0 && !conn.closed {
-		conn.closed = true
-
+	if conn.refCount <= 0 {
 		go func() {
 			// 异步关闭，减少后面的请求阻塞
 			if err := conn.ClientConn.Close(); err != nil {
-				log.Log("poolManager:", err)
+				tracer.AddTrace("[tryClose] close client connection:", conn, err)
 			}
 		}()
 	}
@@ -262,7 +272,7 @@ func (m *poolManager) cleanup() bool {
 
 	for conn := range m.data {
 		if conn.refCount > 0 {
-			log.Log("invalid: conn haven't been closed. ", m.addr)
+			tracer.AddTrace("[cleanup] invalid: conn haven't been closed. ", m.addr)
 		}
 		_ = conn.ClientConn.Close()
 	}
@@ -280,17 +290,18 @@ func newTicker(size int) ticket {
 		tks <- struct{}{}
 	}
 
+	tracer.AddTrace("[ticket] create a new ticket. size is", size)
 	return tks
 }
 
 func (t ticket) get() {
 	<-t
-	println("size after get: ", t.size())
+	tracer.AddTrace("[ticket] size after get: ", t.size())
 }
 
 func (t ticket) release() {
 	t <- struct{}{}
-	println("size after release: ", t.size())
+	tracer.AddTrace("[ticket] size after release: ", t.size())
 }
 
 func (t ticket) size() int {
