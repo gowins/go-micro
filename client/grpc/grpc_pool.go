@@ -32,7 +32,6 @@ type poolConn struct {
 
 	// 用来决定是否关闭
 	closable bool
-	closed   bool
 }
 
 func newPool(size int, ttl time.Duration) *pool {

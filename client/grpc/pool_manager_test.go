@@ -13,6 +13,8 @@ import (
 
 	"google.golang.org/grpc"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
+
+	_ "github.com/micro/go-micro/client/grpc/trace"
 )
 
 func Test_poolManager_get(t *testing.T) {
@@ -53,7 +55,6 @@ func Test_poolManager_get(t *testing.T) {
 	wg.Wait()
 
 	fmt.Println("len ", len(pmgr.data))
-	fmt.Println("created ", pmgr.c.Load())
 	fmt.Println("req ", req.Load())
 	fmt.Println("req t", reqt.Load())
 	fmt.Println("req / per", reqt.Load()/req.Load())
@@ -219,7 +220,6 @@ func TestPool(t *testing.T) {
 			So(len(pm.data), ShouldEqual, 0)
 			So(len(pm.indexes), ShouldEqual, 1)
 			So(conn.closable, ShouldBeTrue)
-			So(conn.closed, ShouldBeFalse)
 
 			// 这时候第二次才请求
 			err := invokeWithConn(conn.ClientConn)
@@ -228,7 +228,6 @@ func TestPool(t *testing.T) {
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, 0)
 			So(len(pm.indexes), ShouldEqual, 1)
-			So(conn.closed, ShouldBeTrue)
 
 			// 第四次请求
 			conn1, _ := pm.get(grpc.WithInsecure())
@@ -274,7 +273,6 @@ func TestPool(t *testing.T) {
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, 1)
 			So(len(pm.indexes), ShouldEqual, 1)
-			So(pm.c.Load(), ShouldEqual, 1)
 		})
 
 		Convey("先请求一次,再并发请求requestPerConn+1次,map跟slice都有两个连接", func() {
@@ -305,7 +303,6 @@ func TestPool(t *testing.T) {
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, 2)
 			So(len(pm.indexes), ShouldEqual, 2)
-			So(pm.c.Load(), ShouldEqual, 2)
 		})
 
 		Convey("先并发两次请求,再并发请求requestPerConn*size次,map跟slice都有两个连接", func() {
@@ -341,7 +338,6 @@ func TestPool(t *testing.T) {
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, size)
 			So(len(pm.indexes), ShouldEqual, size)
-			So(pm.c.Load(), ShouldEqual, 2)
 		})
 
 		Convey("先并发两次请求,再并发请求(requestPerConn*size)+1次,map跟slice都有两个连接", func() {
@@ -377,7 +373,6 @@ func TestPool(t *testing.T) {
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, size)
 			So(len(pm.indexes), ShouldEqual, size)
-			So(pm.c.Load(), ShouldEqual, 2)
 		})
 
 		Convey("先请求一次,再并发请求(requestPerConn*size)+1次,map跟slice都有三个连接", func() {
@@ -408,7 +403,6 @@ func TestPool(t *testing.T) {
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, size)
 			So(len(pm.indexes), ShouldEqual, size)
-			So(pm.c.Load(), ShouldEqual, 3)
 		})
 	})
 
