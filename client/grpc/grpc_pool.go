@@ -7,6 +7,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	// 偿试清理间隔
+	cleanupInterval = time.Minute * 10
+)
+
 type pool struct {
 	size int
 	ttl  int64
@@ -65,7 +70,7 @@ func (p *pool) getManager(addr string) *poolManager {
 }
 
 func (p *pool) cleanup() {
-	timer := time.NewTicker(time.Minute * 10)
+	timer := time.NewTicker(cleanupInterval)
 	for range timer.C {
 		p.Lock()
 		snapshots := p.conns

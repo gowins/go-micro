@@ -76,20 +76,22 @@ func invoke(pmgr *poolManager, t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	invokeWithConn(conn.ClientConn, t)
+	err = invokeWithConn(conn.ClientConn)
 	pmgr.put(conn, err)
 }
 
-func invokeWithConn(conn *grpc.ClientConn, t *testing.T) {
+func invokeWithConn(conn *grpc.ClientConn) error {
 	c := pb.NewGreeterClient(conn)
 	ctx, _ := context.WithTimeout(context.TODO(), time.Second*2)
 	rsp, err := c.SayHello(ctx, &pb.HelloRequest{Name: "John"})
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	if rsp.Message != "Hello John" {
-		t.Fatalf("Got unexpected response %v \n", rsp.Message)
+		return fmt.Errorf("Got unexpected response %v \n", rsp.Message)
 	}
+
+	return nil
 }
 
 func invokeWithErr(pmgr *poolManager, t *testing.T) {
@@ -97,8 +99,8 @@ func invokeWithErr(pmgr *poolManager, t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	invokeWithConn(conn.ClientConn, t)
-	pmgr.put(conn, errors.New("no error"))
+	_ = invokeWithConn(conn.ClientConn)
+	pmgr.put(conn, errors.New("error here. "))
 }
 
 func invokeWithCanceledErr(pmgr *poolManager, t *testing.T) {
@@ -106,8 +108,8 @@ func invokeWithCanceledErr(pmgr *poolManager, t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	invokeWithConn(conn.ClientConn, t)
-	pmgr.put(conn, canceledErr)
+	err = invokeWithConn(conn.ClientConn)
+	pmgr.put(conn, err)
 }
 
 func ExampleTicketGet() {
@@ -220,8 +222,8 @@ func TestPool(t *testing.T) {
 			So(conn.closed, ShouldBeFalse)
 
 			// 这时候第二次才请求
-			invokeWithConn(conn.ClientConn, t)
-			pm.put(conn, nil)
+			err := invokeWithConn(conn.ClientConn)
+			pm.put(conn, err)
 
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, 0)
@@ -231,8 +233,8 @@ func TestPool(t *testing.T) {
 			// 第四次请求
 			conn1, _ := pm.get(grpc.WithInsecure())
 			So(pm.tickets.size(), ShouldEqual, size-1)
-			invokeWithConn(conn1.ClientConn, t)
-			pm.put(conn1, nil)
+			err = invokeWithConn(conn1.ClientConn)
+			pm.put(conn1, err)
 			So(pm.tickets.size(), ShouldEqual, size)
 		})
 	})
@@ -309,10 +311,10 @@ func TestPool(t *testing.T) {
 		Convey("先并发两次请求,再并发请求requestPerConn*size次,map跟slice都有两个连接", func() {
 			conn1, _ := pm.get(grpc.WithInsecure())
 			conn2, _ := pm.get(grpc.WithInsecure())
-			invokeWithConn(conn1.ClientConn, t)
-			invokeWithConn(conn2.ClientConn, t)
-			pm.put(conn1, nil)
-			pm.put(conn2, nil)
+			err1 := invokeWithConn(conn1.ClientConn)
+			err2 := invokeWithConn(conn2.ClientConn)
+			pm.put(conn1, err1)
+			pm.put(conn2, err2)
 
 			wg := sync.WaitGroup{}
 			lock := &sync.Mutex{}
@@ -345,10 +347,10 @@ func TestPool(t *testing.T) {
 		Convey("先并发两次请求,再并发请求(requestPerConn*size)+1次,map跟slice都有两个连接", func() {
 			conn1, _ := pm.get(grpc.WithInsecure())
 			conn2, _ := pm.get(grpc.WithInsecure())
-			invokeWithConn(conn1.ClientConn, t)
-			invokeWithConn(conn2.ClientConn, t)
-			pm.put(conn1, nil)
-			pm.put(conn2, nil)
+			err1 := invokeWithConn(conn1.ClientConn)
+			err2 := invokeWithConn(conn2.ClientConn)
+			pm.put(conn1, err1)
+			pm.put(conn2, err2)
 
 			wg := sync.WaitGroup{}
 			lock := &sync.Mutex{}
