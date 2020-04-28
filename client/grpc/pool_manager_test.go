@@ -2,12 +2,15 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/smartystreets/goconvey/convey"
 	"github.com/uber-go/atomic"
+
 	"google.golang.org/grpc"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 )
@@ -73,17 +76,38 @@ func invoke(pmgr *poolManager, t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := pb.NewGreeterClient(conn.ClientConn)
+	invokeWithConn(conn.ClientConn, t)
+	pmgr.put(conn, err)
+}
+
+func invokeWithConn(conn *grpc.ClientConn, t *testing.T) {
+	c := pb.NewGreeterClient(conn)
 	ctx, _ := context.WithTimeout(context.TODO(), time.Second*2)
 	rsp, err := c.SayHello(ctx, &pb.HelloRequest{Name: "John"})
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if rsp.Message != "Hello John" {
 		t.Fatalf("Got unexpected response %v \n", rsp.Message)
 	}
-	pmgr.put(conn, err)
+}
+
+func invokeWithErr(pmgr *poolManager, t *testing.T) {
+	conn, err := pmgr.get(grpc.WithInsecure())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokeWithConn(conn.ClientConn, t)
+	pmgr.put(conn, errors.New("no error"))
+}
+
+func invokeWithCanceledErr(pmgr *poolManager, t *testing.T) {
+	conn, err := pmgr.get(grpc.WithInsecure())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokeWithConn(conn.ClientConn, t)
+	pmgr.put(conn, canceledErr)
 }
 
 func ExampleTicketGet() {
@@ -96,4 +120,305 @@ func ExampleTicketGet() {
 	// Output:
 	// 9
 	// 10
+}
+
+func TestPool(t *testing.T) {
+	convey.Convey("pool size", t, func() {
+
+		size := 10
+		ttl := 2
+		addr := "127.0.0.1:50054"
+		pm := newManager(addr, size, int64(ttl))
+
+		convey.Convey("只请求一次,map跟slice都有一个连接", func() {
+			invoke(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+		})
+
+		convey.Convey("先请求一次等待ttl过期,map跟slice都还有一个连接", func() {
+			invoke(pm, t)
+			time.Sleep(time.Second * time.Duration(ttl))
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+		})
+
+		convey.Convey("先请求一次等待ttl过期后再请求,"+
+			"map有一个连接,而slice会有两个,其中一个是过期连接", func() {
+			invoke(pm, t)
+			time.Sleep(time.Second * time.Duration(ttl))
+			invoke(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 2)
+		})
+
+		convey.Convey("先请求一次等待ttl过期再请求两次"+
+			"map跟slice都只会有一个连接", func() {
+			invoke(pm, t)
+			time.Sleep(time.Second * time.Duration(ttl))
+			invoke(pm, t)
+			invoke(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+		})
+
+		convey.Convey("先请求一次触发错误,map跟slice都没有连接,"+
+			"再第二次正常请求，map跟slice都只会有一个连接", func() {
+			invokeWithErr(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 0)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 0)
+
+			invoke(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+		})
+
+		convey.Convey("先请求一次,"+
+			"再第二次请求一次，map没有连接,而slice会有一个是待关闭连接", func() {
+			invoke(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+
+			invokeWithErr(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 0)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+		})
+
+		convey.Convey("先请求一次,"+
+			"再第二次请求有Cancel错误，map跟slice都有一个连接,不受特定错误影响", func() {
+			invoke(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+
+			invokeWithCanceledErr(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+		})
+
+		convey.Convey("先请求一次没有错误,"+
+			"第二次拿出来先不放回去,第三次请求触发错误之后再发起第二次请求", func() {
+
+			// 第一次一切正常
+			invoke(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+
+			// 第二次先取出来
+			conn, _ := pm.get(grpc.WithInsecure())
+
+			// 第三次报错
+			invokeWithErr(pm, t)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 0)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+			convey.So(conn.closable, convey.ShouldBeTrue)
+			convey.So(conn.closed, convey.ShouldBeFalse)
+
+			// 这时候第二次才请求
+			invokeWithConn(conn.ClientConn, t)
+			pm.put(conn, nil)
+
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 0)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+			convey.So(conn.closed, convey.ShouldBeTrue)
+
+			// 第四次请求
+			conn1, _ := pm.get(grpc.WithInsecure())
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size-1)
+			invokeWithConn(conn1.ClientConn, t)
+			pm.put(conn1, nil)
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+		})
+	})
+
+	convey.Convey("create new conn", t, func() {
+
+		size := 2
+		ttl := 3
+		addr := "127.0.0.1:50054"
+		pm := newManager(addr, size, int64(ttl))
+
+		convey.Convey("先请求一次,再并发请求requestPerConn次,"+
+			"map跟slice都只有有一个连接", func() {
+			invoke(pm, t)
+
+			wg := sync.WaitGroup{}
+			lock := &sync.Mutex{}
+			cond := sync.NewCond(lock)
+
+			go func() {
+				time.Sleep(time.Second * 2)
+				lock.Lock()
+				cond.Broadcast()
+				lock.Unlock()
+			}()
+			for i := 0; i < requestPerConn; i++ {
+				wg.Add(1)
+				go func() {
+					lock.Lock()
+					cond.Wait()
+					lock.Unlock()
+
+					invoke(pm, t)
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 1)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 1)
+			convey.So(pm.c.Load(), convey.ShouldEqual, 1)
+		})
+
+		convey.Convey("先请求一次,再并发请求requestPerConn+1次,"+
+			"map跟slice都有两个连接", func() {
+			invoke(pm, t)
+
+			wg := sync.WaitGroup{}
+			lock := &sync.Mutex{}
+			cond := sync.NewCond(lock)
+
+			go func() {
+				time.Sleep(time.Second * 2)
+				lock.Lock()
+				cond.Broadcast()
+				lock.Unlock()
+			}()
+			for i := 0; i < requestPerConn+1; i++ {
+				wg.Add(1)
+				go func() {
+					lock.Lock()
+					cond.Wait()
+					lock.Unlock()
+
+					invoke(pm, t)
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, 2)
+			convey.So(len(pm.indexes), convey.ShouldEqual, 2)
+			convey.So(pm.c.Load(), convey.ShouldEqual, 2)
+		})
+
+		convey.Convey("先并发两次请求,再并发请求requestPerConn*size次,"+
+			"map跟slice都有两个连接", func() {
+			conn1, _ := pm.get(grpc.WithInsecure())
+			conn2, _ := pm.get(grpc.WithInsecure())
+			invokeWithConn(conn1.ClientConn, t)
+			invokeWithConn(conn2.ClientConn, t)
+			pm.put(conn1, nil)
+			pm.put(conn2, nil)
+
+			wg := sync.WaitGroup{}
+			lock := &sync.Mutex{}
+			cond := sync.NewCond(lock)
+
+			go func() {
+				time.Sleep(time.Second * 2)
+				lock.Lock()
+				cond.Broadcast()
+				lock.Unlock()
+			}()
+			for i := 0; i < requestPerConn*size; i++ {
+				wg.Add(1)
+				go func() {
+					lock.Lock()
+					cond.Wait()
+					lock.Unlock()
+
+					invoke(pm, t)
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, size)
+			convey.So(len(pm.indexes), convey.ShouldEqual, size)
+			convey.So(pm.c.Load(), convey.ShouldEqual, 2)
+		})
+
+		convey.Convey("先并发两次请求,再并发请求(requestPerConn*size)+1次,"+
+			"map跟slice都有两个连接", func() {
+			conn1, _ := pm.get(grpc.WithInsecure())
+			conn2, _ := pm.get(grpc.WithInsecure())
+			invokeWithConn(conn1.ClientConn, t)
+			invokeWithConn(conn2.ClientConn, t)
+			pm.put(conn1, nil)
+			pm.put(conn2, nil)
+
+			wg := sync.WaitGroup{}
+			lock := &sync.Mutex{}
+			cond := sync.NewCond(lock)
+
+			go func() {
+				time.Sleep(time.Second * 2)
+				lock.Lock()
+				cond.Broadcast()
+				lock.Unlock()
+			}()
+			for i := 0; i < (requestPerConn*size)+1; i++ {
+				wg.Add(1)
+				go func() {
+					lock.Lock()
+					cond.Wait()
+					lock.Unlock()
+
+					invoke(pm, t)
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, size)
+			convey.So(len(pm.indexes), convey.ShouldEqual, size)
+			convey.So(pm.c.Load(), convey.ShouldEqual, 2)
+		})
+
+		convey.Convey("先请求一次,再并发请求(requestPerConn*size)+1次,"+
+			"map跟slice都有三个连接", func() {
+			invoke(pm, t)
+
+			wg := sync.WaitGroup{}
+			lock := &sync.Mutex{}
+			cond := sync.NewCond(lock)
+
+			go func() {
+				time.Sleep(time.Second * 2)
+				lock.Lock()
+				cond.Broadcast()
+				lock.Unlock()
+			}()
+			for i := 0; i < (requestPerConn*size)+1; i++ {
+				wg.Add(1)
+				go func() {
+					lock.Lock()
+					cond.Wait()
+					lock.Unlock()
+
+					invoke(pm, t)
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+			convey.So(pm.tickets.size(), convey.ShouldEqual, size)
+			convey.So(len(pm.data), convey.ShouldEqual, size)
+			convey.So(len(pm.indexes), convey.ShouldEqual, size)
+			convey.So(pm.c.Load(), convey.ShouldEqual, 3)
+		})
+	})
+
 }

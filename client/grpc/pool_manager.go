@@ -6,16 +6,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/uber-go/atomic"
-	"google.golang.org/grpc"
-
 	"github.com/micro/go-micro/util/log"
+	"github.com/uber-go/atomic"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	requestPerConn = 8
+)
+
+var (
+	canceledErr         = status.Errorf(codes.DeadlineExceeded, context.Canceled.Error())
+	deadlineExceededErr = status.Errorf(codes.Canceled, context.DeadlineExceeded.Error())
 )
 
 type poolManager struct {
@@ -133,6 +139,7 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 		// 2. 真的没有连接可用的时间，这时新建连接
 		conn, err := m.create(opts...)
 		ch <- &pair{conn, err}
+
 	}()
 
 	select {
@@ -216,9 +223,12 @@ func (m *poolManager) put(conn *poolConn, err error) {
 
 	conn.refCount--
 
-	// 1. 任何一次请求错误了就从连接池中移除，并且标识存在失败过
+	// 1. 任何一次请求错误(非特定两个错误)了就从连接池中移除，并且标识存在失败过
 	// 标识可关闭
-	if err != nil {
+	if err != nil &&
+		err.Error() != canceledErr.Error() &&
+		err.Error() != deadlineExceededErr.Error() {
+
 		conn.closable = true
 	}
 
@@ -257,9 +267,12 @@ func (m *poolManager) tryClose(conn *poolConn) {
 	if conn.refCount <= 0 && !conn.closed {
 		conn.closed = true
 
-		if err := conn.ClientConn.Close(); err != nil {
-			log.Log("poolManager:", err)
-		}
+		go func() {
+			// 异步关闭，减少后面的请求阻塞
+			if err := conn.ClientConn.Close(); err != nil {
+				log.Log("poolManager:", err)
+			}
+		}()
 	}
 }
 
