@@ -139,7 +139,6 @@ func (m *poolManager) get(opts ...grpc.DialOption) (*poolConn, error) {
 		// 2. 真的没有连接可用的时间，这时新建连接
 		conn, err := m.create(opts...)
 		ch <- &pair{conn, err}
-
 	}()
 
 	select {
