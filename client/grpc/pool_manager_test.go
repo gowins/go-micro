@@ -45,7 +45,6 @@ func Test_poolManager_get(t *testing.T) {
 				lock.Unlock()
 
 				invoke(pmgr, t)
-				invoke(pmgr, t)
 			}()
 		}
 
@@ -141,16 +140,22 @@ func TestPool(t *testing.T) {
 		})
 
 		Convey("先请求一次等待ttl过期,map跟slice都还有一个连接", func() {
-			invoke(pm, t)
-			time.Sleep(time.Second * time.Duration(ttl))
+			conn, err := pm.get(grpc.WithInsecure())
+			So(err, ShouldBeNil)
+			err = invokeWithConn(conn.ClientConn)
+			pm.put(conn, err)
+			time.Sleep(time.Duration(pm.ttl-int64(time.Since(conn.created).Seconds())+1) * time.Second)
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, 1)
 			So(len(pm.indexes), ShouldEqual, 1)
 		})
 
 		Convey("先请求一次等待ttl过期后再请求,map有一个连接,而slice会有两个,其中一个是过期连接", func() {
-			invoke(pm, t)
-			time.Sleep(time.Second * time.Duration(ttl))
+			conn, err := pm.get(grpc.WithInsecure())
+			So(err, ShouldBeNil)
+			err = invokeWithConn(conn.ClientConn)
+			pm.put(conn, err)
+			time.Sleep(time.Duration(pm.ttl-int64(time.Since(conn.created).Seconds())+1) * time.Second)
 			invoke(pm, t)
 			So(pm.tickets.size(), ShouldEqual, size)
 			So(len(pm.data), ShouldEqual, 1)
@@ -158,8 +163,11 @@ func TestPool(t *testing.T) {
 		})
 
 		Convey("先请求一次等待ttl过期再请求两次,map跟slice都只会有一个连接", func() {
-			invoke(pm, t)
-			time.Sleep(time.Second * time.Duration(ttl))
+			conn, err := pm.get(grpc.WithInsecure())
+			So(err, ShouldBeNil)
+			err = invokeWithConn(conn.ClientConn)
+			pm.put(conn, err)
+			time.Sleep(time.Duration(pm.ttl-int64(time.Since(conn.created).Seconds())+1) * time.Second)
 			invoke(pm, t)
 			invoke(pm, t)
 			So(pm.tickets.size(), ShouldEqual, size)
