@@ -166,7 +166,7 @@ func (m *poolManager) tryFindOne() (*poolConn, bool) {
 
 func (m *poolManager) create(opts ...grpc.DialOption) (*poolConn, error) {
 	// 如果从 manager 中找不到可用的连接时，新建一个连接
-	cc, err := grpc.Dial(m.addr, opts...)
+	cc, err := grpc.Dial(m.addr, WithDefaultDialOptions(opts...)...)
 	if err != nil {
 		tracer.AddTrace("dial error: ", "addr is: ", m.addr)
 		return nil, err
