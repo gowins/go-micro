@@ -19,6 +19,7 @@ import (
 	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/transport"
 
+	pool "github.com/gowins/go-kit/grpc/client/pool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
@@ -28,7 +29,7 @@ import (
 type grpcClient struct {
 	once sync.Once
 	opts client.Options
-	pool *pool
+	pool *pool.Pool
 }
 
 func init() {
@@ -113,7 +114,7 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 
 	var grr error
 
-	cc, err := g.pool.getConn(address, grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
+	cc, err := g.pool.GetConn(address, grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
 		grpc.WithTimeout(opts.DialTimeout), g.secure(),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
@@ -124,7 +125,7 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	}
 	defer func() {
 		// defer execution of release
-		g.pool.release(address, cc, grr)
+		g.pool.Release(address, cc, grr)
 	}()
 
 	ch := make(chan error, 1)
@@ -272,20 +273,12 @@ func (g *grpcClient) newCodec(contentType string) (codec.NewCodec, error) {
 }
 
 func (g *grpcClient) Init(opts ...client.Option) error {
-	size := g.opts.PoolSize
-	ttl := g.opts.PoolTTL
-
 	for _, o := range opts {
 		o(&g.opts)
 	}
 
 	// update pool configuration if the options changed
-	if size != g.opts.PoolSize || ttl != g.opts.PoolTTL {
-		g.pool.Lock()
-		g.pool.size = g.opts.PoolSize
-		g.pool.ttl = int64(g.opts.PoolTTL.Seconds())
-		g.pool.Unlock()
-	}
+	g.pool.Init(g.opts.PoolSize, g.opts.PoolTTL)
 
 	return nil
 }
@@ -555,7 +548,7 @@ func newClient(opts ...client.Option) client.Client {
 	rc := &grpcClient{
 		once: sync.Once{},
 		opts: options,
-		pool: newPool(options.PoolSize, options.PoolTTL),
+		pool: pool.NewPool(options.PoolSize, options.PoolTTL),
 	}
 
 	c := client.Client(rc)

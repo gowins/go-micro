@@ -25,6 +25,7 @@ require (
 	github.com/google/uuid v1.1.1
 	github.com/gorilla/handlers v1.4.0
 	github.com/gorilla/websocket v1.4.0
+	github.com/gowins/go-kit v0.0.1-beta1
 	github.com/hashicorp/consul/api v1.1.0
 	github.com/hashicorp/go-immutable-radix v1.1.0 // indirect
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
@@ -58,16 +59,11 @@ require (
 	github.com/onsi/gomega v1.5.0 // indirect
 	github.com/pkg/errors v0.8.1
 	github.com/sirupsen/logrus v1.4.2 // indirect
-	github.com/smartystreets/goconvey v1.6.4
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
-	github.com/uber-go/atomic v0.0.0-00010101000000-000000000000
-	go.uber.org/atomic v1.6.0 // indirect
 	golang.org/x/crypto v0.0.0-20200323165209-0ec3e9974c59
 	golang.org/x/net v0.0.0-20190620200207-3b0461eec859
 	golang.org/x/text v0.3.2 // indirect
-	google.golang.org/appengine v1.4.0 // indirect
-	google.golang.org/genproto v0.0.0-20190620144150-6af8c5fc6601 // indirect
-	google.golang.org/grpc v1.21.1
+	google.golang.org/grpc v1.26.0
 	gopkg.in/go-playground/assert.v1 v1.2.1 // indirect
 	gopkg.in/go-playground/validator.v9 v9.29.0
 	gopkg.in/src-d/go-git.v4 v4.12.0
