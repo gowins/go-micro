@@ -112,7 +112,10 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	maxRecvMsgSize := g.maxRecvMsgSizeValue()
 	maxSendMsgSize := g.maxSendMsgSizeValue()
 
-	var grr error
+	var (
+		grr       error
+		errIgnore bool
+	)
 
 	cc, err := g.pool.GetConn(address, grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
 		grpc.WithTimeout(opts.DialTimeout), g.secure(),

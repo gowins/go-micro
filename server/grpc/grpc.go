@@ -40,8 +40,8 @@ var (
 )
 
 const (
-	defaultContentType = "application/grpc"
-	DefaultSleepAfterDeregister = time.Second*2
+	defaultContentType          = "application/grpc"
+	DefaultSleepAfterDeregister = time.Second * 2
 )
 
 type grpcServer struct {
@@ -351,6 +351,16 @@ func (g *grpcServer) processRequest(stream grpc.ServerStream, service *service, 
 		for i := len(g.opts.HdlrWrappers); i > 0; i-- {
 			fn = g.opts.HdlrWrappers[i-1](fn)
 		}
+
+		fn = func(handlerFunc server.HandlerFunc) server.HandlerFunc {
+			return func(ctx context.Context, req server.Request, rsp interface{}) error {
+				err := handlerFunc(ctx, req, rsp)
+				if err != nil {
+					return errors.New("", err.Error(), -1)
+				}
+				return err
+			}
+		}(fn)
 
 		statusCode := codes.OK
 		statusDesc := ""
