@@ -5,26 +5,33 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func microError(err error) error {
+func microError(err error) (bool, error) {
+	// 这个错误是否可以忽略
+	ignore := false
+
 	// no error
 	switch err {
 	case nil:
-		return nil
+		return ignore, nil
 	}
 
 	// micro error
 	if v, ok := err.(*errors.Error); ok {
-		return v
+		return ignore, v
 	}
 
 	// grpc error
 	if s, ok := status.FromError(err); ok {
-		if e := errors.Parse(s.Message()); e.Code > 0 {
-			return e // actually a micro error
+		errMsg := s.Message()
+		if e := errors.Parse(errMsg); e.Code > 0 {
+			return ignore, e // actually a micro error
+		} else if e.Code == -1 {
+			ignore = true // actually a business error
+			errMsg = e.Detail
 		}
-		return errors.InternalServerError("go.micro.client", s.Message())
+		return ignore, errors.InternalServerError("go.micro.client", errMsg)
 	}
 
 	// do nothing
-	return err
+	return ignore, err
 }
