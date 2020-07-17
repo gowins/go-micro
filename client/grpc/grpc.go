@@ -128,14 +128,19 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	}
 	defer func() {
 		// defer execution of release
-		g.pool.Release(address, cc, grr)
+		if errIgnore {
+			g.pool.Release(address, cc, nil)
+		} else {
+			g.pool.Release(address, cc, grr)
+		}
 	}()
 
 	ch := make(chan error, 1)
 
 	go func() {
 		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
-		ch <- microError(err)
+		errIgnore, err = microError(err)
+		ch <- err
 	}()
 
 	select {
