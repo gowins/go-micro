@@ -191,7 +191,15 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 
 		// cache results
 		c.Lock()
-		c.set(service, c.cp(services))
+		// ttl 在每次 set 时是会更新的，而且粒度是 service ，所以用这个值也可准确的判断
+		// 1. 非定时器更新，理论上应该不会触发条件
+		// 2. 定时器更新，判断上一次 watch 更新时间是否还在 5 秒内，如果 5 秒内丢弃此次更新
+		ttl := c.ttls[service]
+		if !forced || (forced && t.Sub(ttl.Add(-c.opts.TTL)) > time.Second*5) {
+			c.set(service, c.cp(services))
+		} else {
+			log.Logf("ignore(%s) at: %v", service, t.Format(time.RFC3339Nano))
+		}
 		c.Unlock()
 
 		return services, nil
@@ -212,7 +220,7 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 func interval(in time.Duration) time.Duration {
 	rand.Seed(time.Now().UnixNano())
 	// [0,n)
-	d := in - time.Duration(rand.Int63n(19) + 1) *time.Second
+	d := in - time.Duration(rand.Int63n(19)+1)*time.Second
 
 	return d
 }
