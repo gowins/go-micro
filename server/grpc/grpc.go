@@ -40,8 +40,8 @@ var (
 )
 
 const (
-	defaultContentType = "application/grpc"
-	DefaultSleepAfterDeregister = time.Second*2
+	defaultContentType          = "application/grpc"
+	DefaultSleepAfterDeregister = time.Second * 2
 )
 
 type grpcServer struct {

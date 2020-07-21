@@ -218,7 +218,6 @@ func (c *cache) get(service string) ([]*registry.Service, error) {
 // interval 计算某个服务需要更新的间隔
 // x - rand(1 - 19)  周期 41-59s 之间更新一次
 func interval(in time.Duration) time.Duration {
-	rand.Seed(time.Now().UnixNano())
 	// [0,n)
 	d := in - time.Duration(rand.Int63n(19)+1)*time.Second
 
