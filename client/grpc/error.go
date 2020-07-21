@@ -17,6 +17,8 @@ func microError(err error) (bool, error) {
 
 	// micro error
 	if v, ok := err.(*errors.Error); ok {
+		// micro的errors包增加了一个特定的错误类型，
+		// 避免一些特殊情况我们没有覆盖到（比如grpc.call之前就返回错误了）。
 		if v.Code == errors.StatusIgnorableError {
 			ignorable = true // actually a business error
 		}
