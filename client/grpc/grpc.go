@@ -122,35 +122,34 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 		return errors.InternalServerError("go.micro.client", fmt.Sprintf("Error sending request: %v", err))
 	}
 
-	type gError struct {
-		err       error
+	var (
+		grr       error
 		ignorable bool
-	}
-
-	grr := gError{}
-	ch := make(chan error, 1)
+		ch        chan error = make(chan error, 1)
+	)
 
 	defer func() {
 		// defer execution of release
-		if grr.ignorable {
-			g.pool.Release(address, cc, nil)
-		} else {
-			g.pool.Release(address, cc, grr.err)
+		var err error
+		if !ignorable {
+			err = grr
 		}
+		g.pool.Release(address, cc, err)
 	}()
 
 	go func() {
-		ch <- cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
+		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
+		ch <- err
 	}()
 
 	select {
 	case err := <-ch:
-		grr.ignorable, grr.err = microError(err)
+		ignorable, grr = microError(err)
 	case <-ctx.Done():
-		grr.err = ctx.Err()
+		grr = ctx.Err()
 	}
 
-	return grr.err
+	return grr
 }
 
 func (g *grpcClient) stream(ctx context.Context, node *registry.Node, req client.Request, opts client.CallOptions) (client.Stream, error) {
