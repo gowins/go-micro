@@ -121,3 +121,17 @@ func InternalServerError(id, format string, a ...interface{}) error {
 		Status: http.StatusText(500),
 	}
 }
+
+const (
+	StatusIgnorableError = -1
+)
+
+// IgnoreError generates a -1 error.
+func IgnorableError(id, format string, a ...interface{}) error {
+	return &Error{
+		Id:     id,
+		Code:   StatusIgnorableError,
+		Detail: fmt.Sprintf(format, a...),
+		Status: http.StatusText(200),
+	}
+}
