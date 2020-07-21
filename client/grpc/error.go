@@ -7,31 +7,34 @@ import (
 
 func microError(err error) (bool, error) {
 	// 这个错误是否可以忽略
-	ignore := false
+	ignorable := false
 
 	// no error
 	switch err {
 	case nil:
-		return ignore, nil
+		return ignorable, nil
 	}
 
 	// micro error
 	if v, ok := err.(*errors.Error); ok {
-		return ignore, v
+		if v.Code == errors.StatusIgnorableError {
+			ignorable = true // actually a business error
+		}
+		return ignorable, v
 	}
 
 	// grpc error
 	if s, ok := status.FromError(err); ok {
 		errMsg := s.Message()
-		if e := errors.Parse(errMsg); e.Code > 0 {
-			return ignore, e // actually a micro error
-		} else if e.Code == -1 {
-			ignore = true // actually a business error
+		if e := errors.Parse(errMsg); e.Code == errors.StatusIgnorableError {
+			ignorable = true // actually a business error
 			errMsg = e.Detail
+		} else if e.Code > 0 {
+			return ignorable, e // actually a micro error
 		}
-		return ignore, errors.InternalServerError("go.micro.client", errMsg)
+		return ignorable, errors.InternalServerError("go.micro.client", errMsg)
 	}
 
 	// do nothing
-	return ignore, err
+	return ignorable, err
 }
