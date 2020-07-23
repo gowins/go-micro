@@ -25,7 +25,7 @@ require (
 	github.com/google/uuid v1.1.1
 	github.com/gorilla/handlers v1.4.0
 	github.com/gorilla/websocket v1.4.0
-	github.com/gowins/go-kit v0.0.1-beta1
+	github.com/gowins/go-kit v0.0.1
 	github.com/hashicorp/consul/api v1.1.0
 	github.com/hashicorp/go-immutable-radix v1.1.0 // indirect
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
@@ -69,5 +69,3 @@ require (
 	gopkg.in/src-d/go-git.v4 v4.12.0
 	gopkg.in/telegram-bot-api.v4 v4.6.4
 )
-
-replace github.com/uber-go/atomic => github.com/uber-go/atomic v1.4.0
