@@ -123,8 +123,8 @@ func InternalServerError(id, format string, a ...interface{}) error {
 }
 
 type IgnorableError struct {
-	Err       error `json:"error"`
-	Ignorable bool  `json:"ignorable"`
+	Err       string `json:"error"`
+	Ignorable bool   `json:"ignorable"`
 }
 
 func (e *IgnorableError) Error() string {
@@ -132,18 +132,20 @@ func (e *IgnorableError) Error() string {
 	return string(b)
 }
 
-// Parse tries to parse a JSON string into an error. If that
+// UnwrapIgnorableError tries to parse a JSON string into an error. If that
 // fails, it will set the given string as the error detail.
-func IsIgnorableError(err error) (bool, error) {
-	if err == nil {
-		return false, nil
+func UnwrapIgnorableError(err string) (bool, string) {
+	if err == "" {
+		return false, err
 	}
 
-	if e, ok := err.(*IgnorableError); ok {
-		return true, e.Err
+	igerr := new(IgnorableError)
+	uerr := json.Unmarshal([]byte(err), igerr)
+	if uerr != nil {
+		return false, err
 	}
 
-	return false, err
+	return igerr.Ignorable, igerr.Err
 }
 
 // IgnoreError generates a -1 error.
@@ -153,7 +155,7 @@ func WrapIgnorableError(err error) error {
 	}
 
 	return &IgnorableError{
-		Err:       err,
+		Err:       err.Error(),
 		Ignorable: true,
 	}
 }
