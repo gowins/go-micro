@@ -122,16 +122,38 @@ func InternalServerError(id, format string, a ...interface{}) error {
 	}
 }
 
-const (
-	StatusIgnorableError = -1
-)
+type IgnorableError struct {
+	Err       error `json:"error"`
+	Ignorable bool  `json:"ignorable"`
+}
+
+func (e *IgnorableError) Error() string {
+	b, _ := json.Marshal(e)
+	return string(b)
+}
+
+// Parse tries to parse a JSON string into an error. If that
+// fails, it will set the given string as the error detail.
+func IsIgnorableError(err error) (bool, error) {
+	if err == nil {
+		return false, nil
+	}
+
+	if e, ok := err.(*IgnorableError); ok {
+		return true, e.Err
+	}
+
+	return false, err
+}
 
 // IgnoreError generates a -1 error.
-func IgnorableError(id, format string, a ...interface{}) error {
-	return &Error{
-		Id:     id,
-		Code:   StatusIgnorableError,
-		Detail: fmt.Sprintf(format, a...),
-		Status: http.StatusText(200),
+func WrapIgnorableError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &IgnorableError{
+		Err:       err,
+		Ignorable: true,
 	}
 }

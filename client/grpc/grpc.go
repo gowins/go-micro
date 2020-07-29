@@ -311,7 +311,7 @@ func (g *grpcClient) Call(ctx context.Context, req client.Request, rsp interface
 			}
 
 			if v, ok := callErr.(*errors.Error); ok {
-				v.Detail = fmt.Sprintf("error: %v, node: %v", v.Detail, callNode.Id)
+				v.Id = fmt.Sprintf("id: %v node: %v", v.Id, callNode.Id)
 				callErr = v
 			} else {
 				callErr = fmt.Errorf("error: %v, node: %v", callErr, callNode.Id)
