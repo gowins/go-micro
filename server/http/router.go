@@ -11,14 +11,14 @@ import (
 	"github.com/micro/go-micro/api/resolver/micro"
 	"github.com/micro/go-micro/metadata"
 	"github.com/micro/go-micro/server"
-	"github.com/micro/go-micro/util/ctx"
 )
 
 const defaultContentType = "application/json"
+const contentType = "x-content-type"
 
 var _resolver = micro.NewResolver(resolver.WithNamespace("wpt.api"), resolver.WithHandler("meta"))
 
-// router 用户连接 grpc-gateway http.Handler 和 echo 的 http.Handler
+// router 实现了http.Handler, 同时能够处理HdlrWrappers
 type router struct {
 	opts    *server.Options
 	handler http.Handler
@@ -29,7 +29,7 @@ func (r *router) handle(ctx context.Context, req server.Request, rsp interface{}
 	return nil
 }
 
-func (r *router) handleErr(err error, cx context.Context, rw http.ResponseWriter, req *http.Request) bool {
+func (r *router) handleErr(err error, rw http.ResponseWriter) bool {
 	if err == nil {
 		return true
 	}
@@ -39,23 +39,19 @@ func (r *router) handleErr(err error, cx context.Context, rw http.ResponseWriter
 	return false
 }
 
+// genReq convert http.Request to micro.Request
 func (r *router) genReq(req *http.Request) (*httpRequest, context.Context, error) {
-	// 处理 metadata
-	cx := ctx.FromRequest(req)
+	// 处理 metadata header
 	header := make(metadata.Metadata)
-	if md, ok := metadata.FromContext(cx); ok {
-		for k, v := range md {
-			key := strings.ToLower(k)
-			header[key] = v
-		}
+	for k, v := range req.Header {
+		header[strings.ToLower(k)] = strings.Join(v, ",")
 	}
 
 	ct := defaultContentType
-	if ctype, ok := header["x-content-type"]; ok {
-		ct = ctype
+	if tye, ok := header[contentType]; ok {
+		ct = tye
 	}
-	delete(header, "x-content-type")
-	cx = metadata.NewContext(cx, header)
+	delete(header, contentType)
 
 	ep, err := _resolver.Resolve(req)
 	if err != nil {
@@ -73,9 +69,10 @@ func (r *router) genReq(req *http.Request) (*httpRequest, context.Context, error
 		contentType: ct,
 		method:      ep.Method,
 		body:        body,
+		codec:       newRpcCodec(defaultCodecs[defaultContentType]),
 		req:         req,
 		header:      header,
-	}, cx, nil
+	}, metadata.NewContext(req.Context(), header), nil
 }
 
 // ServeHTTP prepare writer for http
@@ -87,16 +84,20 @@ func (r *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	request, cx, err := r.genReq(req)
-	if !r.handleErr(err, cx, rw, req) {
+	if !r.handleErr(err, rw) {
 		return
 	}
 
-	if !r.handleErr(handler(cx, request, rw), cx, rw, req) {
+	if !r.handleErr(handler(cx, request, rw), rw) {
 		return
 	}
 }
 
 func newRouter(handler http.Handler, opts *server.Options) *router {
+	if handler == nil || opts == nil {
+		panic("handler and opts should not be nil")
+	}
+
 	return &router{
 		opts:    opts,
 		handler: handler,

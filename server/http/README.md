@@ -1,5 +1,4 @@
 # HTTP Server
-
 The HTTP Server is a go-micro.Server. It's a partial implementation which strips out codecs, transports, etc but enables you 
 to create a HTTP Server that could potentially be used for REST based API services.
 
