@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"strings"
-
 	"github.com/micro/go-micro/api/resolver"
 	"github.com/micro/go-micro/api/resolver/micro"
 	"github.com/micro/go-micro/metadata"
 	"github.com/micro/go-micro/server"
+	"io/ioutil"
+	"net/http"
+	"strings"
 )
 
 const defaultContentType = "application/json"
@@ -44,8 +43,10 @@ func (r *router) handleErr(err error, rw http.ResponseWriter) bool {
 func (r *router) genReq(req *http.Request) (*httpRequest, context.Context, error) {
 	// 处理 metadata header
 	header := make(metadata.Metadata)
-	for k, v := range req.Header {
-		header[strings.ToLower(k)] = strings.Join(v, ",")
+	if req.Header != nil {
+		for k, v := range req.Header {
+			header[strings.ToLower(k)] = strings.Join(v, ",")
+		}
 	}
 
 	ct := defaultContentType
