@@ -3,6 +3,7 @@ package httpServer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -16,7 +17,7 @@ import (
 const defaultContentType = "application/json"
 const contentType = "x-content-type"
 
-var _resolver = micro.NewResolver(resolver.WithNamespace("wpt.api"), resolver.WithHandler("meta"))
+var _resolver = micro.NewResolver(resolver.WithHandler("meta"))
 
 // router 实现了http.Handler, 同时能够处理HdlrWrappers
 type router struct {
@@ -65,7 +66,7 @@ func (r *router) genReq(req *http.Request) (*httpRequest, context.Context, error
 	req.Body = ioutil.NopCloser(bytes.NewReader(body))
 
 	return &httpRequest{
-		service:     ep.Name,
+		service:     fmt.Sprintf("%s.%s", r.opts.Name, ep.Name),
 		contentType: ct,
 		method:      ep.Method,
 		body:        body,

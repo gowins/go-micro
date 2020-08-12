@@ -57,7 +57,7 @@ func (e *httpServer) newCodec(contentType string) (codec.NewCodec, error) {
 	if cf, ok := defaultCodecs[contentType]; ok {
 		return cf, nil
 	}
-	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
+	return nil, fmt.Errorf("unsupported Content-Type: %s", contentType)
 }
 
 func (e *httpServer) Options() server.Options {
