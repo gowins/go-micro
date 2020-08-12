@@ -9,6 +9,7 @@ require (
 	github.com/bitly/go-simplejson v0.5.0
 	github.com/bmizerany/assert v0.0.0-20160611221934-b7ed37b82869 // indirect
 	github.com/bwmarrin/discordgo v0.19.0
+	github.com/cloudflare/tableflip v1.2.0
 	github.com/containerd/continuity v0.0.0-20190426062206-aaeac12a7ffc // indirect
 	github.com/forestgiant/sliceutil v0.0.0-20160425183142-94783f95db6c
 	github.com/fsnotify/fsnotify v1.4.7
@@ -46,6 +47,7 @@ require (
 	github.com/marten-seemann/qtls v0.2.4 // indirect
 	github.com/mattn/go-runewidth v0.0.4 // indirect
 	github.com/micro/cli v0.2.0
+	github.com/micro/go-log v0.1.0
 	github.com/micro/mdns v0.1.0
 	github.com/miekg/dns v1.1.14 // indirect
 	github.com/mitchellh/hashstructure v1.0.0
@@ -63,6 +65,7 @@ require (
 	golang.org/x/crypto v0.0.0-20200323165209-0ec3e9974c59
 	golang.org/x/net v0.0.0-20190620200207-3b0461eec859
 	golang.org/x/text v0.3.2 // indirect
+	google.golang.org/appengine v1.4.0
 	google.golang.org/grpc v1.26.0
 	gopkg.in/go-playground/assert.v1 v1.2.1 // indirect
 	gopkg.in/go-playground/validator.v9 v9.29.0
