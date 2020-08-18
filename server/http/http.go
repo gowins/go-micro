@@ -262,8 +262,7 @@ func (e *httpServer) startListen() error {
 	// Create http.Server
 	e.server = &http.Server{Handler: newRouter(handler, &e.opts)}
 	go func() {
-		err := e.server.Serve(ln)
-		if err != http.ErrServerClosed {
+		if err := e.server.Serve(ln); err != http.ErrServerClosed {
 			log.Fatalf("HTTP server: %v, address is :", err, opts.Address)
 		}
 	}()
@@ -298,10 +297,6 @@ func (e *httpServer) Stop() error {
 
 	defer upg.Stop()
 
-	go func() {
-		<-upg.Exit()
-	}()
-
 	if isRestart, ok := e.opts.Context.Value(IsRestart{}).(bool); isRestart && ok {
 		err := upg.Upgrade()
 		if err != nil {
@@ -314,15 +309,7 @@ func (e *httpServer) Stop() error {
 	// Wait for connections to drain.
 	ctx, cancel := context.WithTimeout(e.opts.Context, time.Minute)
 	defer cancel()
-
-	if err := e.server.Shutdown(ctx); err != nil {
-		return err
-	}
-	return nil
-
-	//ch := make(chan error)
-	//e.exit <- ch
-	//return <-ch
+	return e.server.Shutdown(ctx)
 }
 
 func (e *httpServer) String() string {
