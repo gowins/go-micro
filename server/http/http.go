@@ -4,6 +4,7 @@ package httpServer
 import (
 	"context"
 	"fmt"
+	"github.com/micro/go-micro"
 
 	"net/http"
 	"sort"
@@ -280,11 +281,7 @@ func (e *httpServer) startListen() error {
 }
 
 func (e *httpServer) Start() error {
-	if err := e.startListen(); err != nil {
-		return err
-	}
-
-	return nil
+	return e.startListen()
 }
 
 type IsRestart struct{}
@@ -326,4 +323,12 @@ func newServer(opts ...server.Option) server.Server {
 
 func NewServer(opts ...server.Option) server.Server {
 	return newServer(opts...)
+}
+
+func WithRestart() micro.Option {
+	return func(o *micro.Options) {
+		_ = o.Server.Init(func(opts *server.Options) {
+			opts.Context = context.WithValue(opts.Context, IsRestart{}, true)
+		})
+	}
 }
