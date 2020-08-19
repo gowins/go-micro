@@ -54,7 +54,7 @@ func TestHttp(t *testing.T) {
 
 	// Restart
 	if err := srv.Init(func(o *server.Options) {
-		o.Context = context.WithValue(o.Context, IsRestart{}, true)
+		o.Context = context.WithValue(o.Context, NewListener{}, true)
 	}); err != nil {
 		panic(err)
 	}

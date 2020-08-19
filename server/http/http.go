@@ -5,13 +5,13 @@ import (
 	"context"
 	"fmt"
 	"github.com/micro/go-micro"
+	"net"
 
 	"net/http"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/cloudflare/tableflip"
 	log "github.com/micro/go-log"
 	"github.com/pkg/errors"
 
@@ -36,7 +36,7 @@ var (
 
 type httpServer struct {
 	sync.Mutex
-	upg          *tableflip.Upgrader
+	ln           net.Listener
 	server       *http.Server
 	opts         server.Options
 	hd           server.Handler
@@ -237,46 +237,42 @@ func (e *httpServer) Deregister() error {
 }
 
 // startListen 开始网关功能监听
-func (e *httpServer) startListen() error {
+func (e *httpServer) startListen() (err error) {
 	e.Lock()
 	opts := e.opts
 	hd := e.hd
 	e.Unlock()
 
-	upg, err := tableflip.New(tableflip.Options{})
-	if err != nil {
-		return errors.Wrap(err, "Can't create:")
+	var _ln net.Listener
+	if ln, ok := opts.Context.Value(newListener{}).(net.Listener); ok && ln != nil {
+		_ln = ln
+	} else {
+		_ln, err = net.Listen("tcp", opts.Address)
+		if err != nil {
+			return err
+		}
 	}
 
-	// Listen must be called before Ready
-	ln, err := upg.Listen("tcp", opts.Address)
-	if err != nil {
-		return errors.Wrapf(err, "Can't listen: %v", opts.Address)
+	if _ln == nil {
+		return errors.New("net listen error")
 	}
-	log.Logf("Listening on %s", ln.Addr().String())
 
 	handler, ok := hd.Handler().(http.Handler)
 	if !ok {
 		return errors.New("Server required http.Handler")
 	}
 
-	// Create http.Server
-	e.server = &http.Server{Handler: newRouter(handler, &e.opts)}
+	e.Lock()
+	e.ln = _ln
+	e.opts.Address = _ln.Addr().String()
+	e.server = &http.Server{Handler: handler}
+	e.Unlock()
+
 	go func() {
-		if err := e.server.Serve(ln); err != http.ErrServerClosed {
+		if err := e.server.Serve(_ln); err != http.ErrServerClosed {
 			log.Fatalf("HTTP server: %v, address is :", err, opts.Address)
 		}
 	}()
-
-	// 在给父进程发送ready信号前等待5s, 保证子进程网络启动
-	time.Sleep(time.Second * 5)
-	if err := upg.Ready(); err != nil {
-		return errors.Wrap(err, "Can't ready:")
-	}
-
-	// Save for stop
-	e.upg = upg
-
 	return nil
 }
 
@@ -284,23 +280,11 @@ func (e *httpServer) Start() error {
 	return e.startListen()
 }
 
-type IsRestart struct{}
+type newListener struct{}
 
 func (e *httpServer) Stop() error {
-	if e.upg == nil || e.server == nil {
+	if e.server == nil {
 		return nil
-	}
-	upg := e.upg
-
-	defer upg.Stop()
-
-	if isRestart, ok := e.opts.Context.Value(IsRestart{}).(bool); isRestart && ok {
-		err := upg.Upgrade()
-		if err != nil {
-			log.Log("Upgrade failed:\n\n\n\n", err)
-		} else {
-			log.Log("Upgrade succeeded \n\n\n\n")
-		}
 	}
 
 	// Wait for connections to drain.
@@ -325,10 +309,10 @@ func NewServer(opts ...server.Option) server.Server {
 	return newServer(opts...)
 }
 
-func WithRestart() micro.Option {
+func WithListener(ln net.Listener) micro.Option {
 	return func(o *micro.Options) {
 		_ = o.Server.Init(func(opts *server.Options) {
-			opts.Context = context.WithValue(opts.Context, IsRestart{}, true)
+			opts.Context = context.WithValue(opts.Context, newListener{}, ln)
 		})
 	}
 }
