@@ -46,7 +46,6 @@ require (
 	github.com/marten-seemann/qtls v0.2.4 // indirect
 	github.com/mattn/go-runewidth v0.0.4 // indirect
 	github.com/micro/cli v0.2.0
-	github.com/micro/go-log v0.1.0
 	github.com/micro/mdns v0.1.0
 	github.com/miekg/dns v1.1.14 // indirect
 	github.com/mitchellh/hashstructure v1.0.0
