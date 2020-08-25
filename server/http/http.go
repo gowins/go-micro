@@ -4,7 +4,6 @@ package httpServer
 import (
 	"context"
 	"fmt"
-	"github.com/micro/go-micro"
 	"net"
 
 	"net/http"
@@ -12,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/micro/go-log"
 	"github.com/pkg/errors"
 
+	"github.com/micro/go-micro"
 	"github.com/micro/go-micro/broker"
 	"github.com/micro/go-micro/codec"
 	"github.com/micro/go-micro/codec/jsonrpc"
@@ -22,6 +21,7 @@ import (
 	"github.com/micro/go-micro/config/cmd"
 	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/server"
+	"github.com/micro/go-micro/util/log"
 )
 
 var (
