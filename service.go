@@ -115,20 +115,38 @@ func (s *service) Stop() error {
 	return gerr
 }
 
-func (s *service) Run() error {
-	if err := s.Start(); err != nil {
-		return err
+func (s *service) Run() (err error) {
+	if err = s.Start(); err != nil {
+		return
 	}
 
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	quitCh := make(chan os.Signal, 1)
+	signal.Notify(quitCh, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+
+	freezing := false
+	suspCh := make(chan os.Signal, 1)
+	// The SIGUSR1 and SIGUSR2 signals are set aside for you to use any way you want.
+	// So you know that \(^o^)/ !
+	// https://www.gnu.org/software/libc/manual/html_node/Miscellaneous-Signals.html
+	signal.Notify(suspCh, syscall.SIGUSR1)
 
 	select {
-	// wait on kill signal
-	case <-ch:
-	// wait on context cancel
+	// Waiting for suspend signal
+	case <-suspCh:
+		freezing = true
+	// Waiting for quit signal
+	case <-quitCh:
+	// Waiting for context cancel
 	case <-s.opts.Context.Done():
 	}
 
-	return s.Stop()
+	if err = s.Stop(); err != nil {
+		log.Logf("[ExitProgress] Call stop, err: %v", err)
+	}
+
+	// Later, we still need waiting for quit signal if the service is suspending.
+	if freezing {
+		<-quitCh
+	}
+	return
 }
