@@ -46,6 +46,7 @@ const (
 
 type grpcServer struct {
 	rpc  *rServer
+	ctl  *controller
 	srv  *grpc.Server
 	exit chan chan error
 	wg   *sync.WaitGroup
@@ -78,6 +79,8 @@ func newGRPCServer(opts ...server.Option) server.Server {
 		exit:        make(chan chan error),
 		wg:          wait(options.Context),
 	}
+
+	srv.ctl = newCtl(srv)
 
 	// configure the grpc server
 	srv.configure()
@@ -555,6 +558,7 @@ func (g *grpcServer) Register() error {
 	node.Metadata["registry"] = config.Registry.String()
 	node.Metadata["server"] = g.String()
 	node.Metadata["transport"] = g.String()
+	node.Metadata["ctlPort"] = g.ctl.Port
 	// node.Metadata["transport"] = config.Transport.String()
 
 	g.RLock()
@@ -728,6 +732,10 @@ func (g *grpcServer) Start() error {
 
 	log.Logf("Broker [%s] Listening on %s", config.Broker.String(), config.Broker.Address())
 
+	if err := g.ctl.start(); err != nil {
+		log.Log("Controller start error: ", err)
+	}
+
 	// announce self to the world
 	if err := g.Register(); err != nil {
 		log.Log("Server register error: ", err)
@@ -759,6 +767,10 @@ func (g *grpcServer) Start() error {
 			case <-t.C:
 				if err := g.Register(); err != nil {
 					log.Log("Server register error: ", err)
+				}
+			case <-g.ctl.SwitchCh:
+				if err := g.ctl.SwitchState(); err != nil {
+					log.Log("Server switches state error: ", err)
 				}
 			// wait for exit
 			case ch = <-g.exit:
