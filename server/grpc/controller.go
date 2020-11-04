@@ -32,25 +32,9 @@ func (c *controller) start() error {
 
 	log.Logf("Controller [http] Listening on %s", ts.Addr().String())
 
-	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
-		_, _ = writer.Write([]byte(errors.New("", "Hello world!", http.StatusOK).Error()))
-	})
-
-	http.HandleFunc("/controller/switch-state", func(writer http.ResponseWriter, request *http.Request) {
-		var (
-			detail string
-		)
-
-		select {
-		case c.SwitchCh <- struct{}{}:
-			detail = "ok"
-		default:
-			detail = "wait a second"
-		}
-
-		_, _ = writer.Write([]byte(errors.New("", detail, http.StatusOK).Error()))
-		return
-	})
+	if err := c.RegisterHandler(); err != nil {
+		return err
+	}
 
 	go func() {
 		if err := http.Serve(ts, nil); err != nil {
@@ -86,4 +70,27 @@ func (c *controller) SwitchState() error {
 	}
 
 	return nil
+}
+
+func (c *controller) RegisterHandler() error {
+	http.HandleFunc(switchStateHandler(c.SwitchCh))
+	return nil
+}
+
+func switchStateHandler(ch chan<- struct{}) (pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	return "/controller/switch-state", func(writer http.ResponseWriter, request *http.Request) {
+		var (
+			detail string
+		)
+
+		select {
+		case ch <- struct{}{}:
+			detail = "ok"
+		default:
+			detail = "wait a second"
+		}
+
+		_, _ = writer.Write([]byte(errors.New("", detail, http.StatusOK).Error()))
+		return
+	}
 }
