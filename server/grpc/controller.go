@@ -3,12 +3,10 @@ package grpc
 import (
 	"net"
 	"net/http"
-	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
+	"github.com/micro/go-micro/errors"
 	"github.com/micro/go-micro/server"
 	"github.com/micro/go-micro/util/log"
 )
@@ -27,16 +25,6 @@ func newCtl(g *grpcServer) *controller {
 }
 
 func (c *controller) start() error {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGUSR1)
-
-	go func() {
-		// wait on switch signal
-		for range ch {
-			c.SwitchCh <- struct{}{}
-		}
-	}()
-
 	ts, err := net.Listen("tcp", server.DefaultAddress)
 	if err != nil {
 		return err
@@ -44,9 +32,25 @@ func (c *controller) start() error {
 
 	log.Logf("Controller [http] Listening on %s", ts.Addr().String())
 
-	//http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
-	//	writer.Write([]byte("Hello world!"))
-	//})
+	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(errors.New("", "Hello world!", http.StatusOK).Error()))
+	})
+
+	http.HandleFunc("/controller/switch-state", func(writer http.ResponseWriter, request *http.Request) {
+		var (
+			detail string
+		)
+
+		select {
+		case c.SwitchCh <- struct{}{}:
+			detail = "ok"
+		default:
+			detail = "wait a second"
+		}
+
+		_, _ = writer.Write([]byte(errors.New("", detail, http.StatusOK).Error()))
+		return
+	})
 
 	go func() {
 		if err := http.Serve(ts, nil); err != nil {
