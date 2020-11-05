@@ -3,7 +3,7 @@ package grpc
 import (
 	"context"
 	"crypto/tls"
-	"io/ioutil"
+	"os"
 
 	"github.com/micro/go-micro/broker"
 	"github.com/micro/go-micro/codec"
@@ -102,10 +102,10 @@ func newOptions(opt ...server.Option) server.Options {
 		opts.Name = server.DefaultName
 	}
 
-	if name, err := ioutil.ReadFile("/etc/hostname"); err != nil {
+	if name, err := os.Hostname(); err != nil {
 		opts.Hostname = "unknown"
 	} else {
-		opts.Hostname = string(name)
+		opts.Hostname = name
 	}
 
 	if len(opts.Id) == 0 {
