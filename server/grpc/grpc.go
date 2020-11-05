@@ -673,7 +673,7 @@ func (g *grpcServer) Deregister() error {
 	}
 
 	node := &registry.Node{
-		Id:      config.Name + "-" + config.Id,
+		Id:      config.Name + "-" + config.Hostname + "-" + config.Id,
 		Address: addr,
 		Port:    port,
 	}
@@ -768,8 +768,8 @@ func (g *grpcServer) Start() error {
 				if err := g.Register(); err != nil {
 					log.Log("Server register error: ", err)
 				}
-			case <-g.ctl.SwitchCh:
-				if err := g.ctl.SwitchState(); err != nil {
+			case state := <-g.ctl.SwitchCh:
+				if err := g.ctl.SwitchState(state); err != nil {
 					log.Log("Server switches state error: ", err)
 				}
 			// wait for exit
