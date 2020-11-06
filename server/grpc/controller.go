@@ -132,5 +132,5 @@ func swtichStateHandler(ch chan<- State, state State, writer http.ResponseWriter
 		detail = "wait a second"
 	}
 
-	_, _ = writer.Write([]byte(errors.New("", detail, http.StatusOK).Error()))
+	_, _ = writer.Write([]byte(errors.New("", detail, 0).Error()))
 }
