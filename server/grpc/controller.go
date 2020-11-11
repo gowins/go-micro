@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -13,45 +14,43 @@ import (
 	"github.com/micro/go-micro/util/log"
 )
 
-type State int
-
 const (
-	Pause State = iota
-	Resume
+	PatternPrefix = "/controller"
+	OK            = "ok"
 )
 
 type controller struct {
-	g        *grpcServer
-	SwitchCh chan State
-	Port     string
+	Mux     *http.ServeMux
+	Port    string
+	EventCh chan *Event
 }
 
-func newCtl(g *grpcServer) *controller {
+func newCtl() *controller {
 	return &controller{
-		g:        g,
-		SwitchCh: make(chan State),
+		Mux:     http.NewServeMux(),
+		EventCh: make(chan *Event),
 	}
 }
 
 func (c *controller) start() error {
-	ts, err := net.Listen("tcp", server.DefaultAddress)
+	ln, err := net.Listen("tcp", server.DefaultAddress)
 	if err != nil {
 		return err
 	}
 
-	log.Logf("Controller [http] Listening on %s", ts.Addr().String())
+	log.Logf("Controller [http] Listening on %s", ln.Addr().String())
 
-	if err := c.RegisterHandler(); err != nil {
+	if err := c.RegisterHTTPHandler(); err != nil {
 		return err
 	}
 
 	go func() {
-		if err := http.Serve(ts, nil); err != nil {
+		if err := http.Serve(ln, c.Mux); err != nil {
 			log.Log("[controller] Http ListenAndServe error: ", err)
 		}
 	}()
 
-	parts := strings.Split(ts.Addr().String(), ":")
+	parts := strings.Split(ln.Addr().String(), ":")
 	if len(parts) > 1 {
 		port, _ := strconv.Atoi(parts[len(parts)-1])
 		c.Port = strconv.Itoa(port)
@@ -60,36 +59,28 @@ func (c *controller) start() error {
 	return nil
 }
 
-func (c *controller) SwitchState(state State) error {
-	g := c.g
-	prefix := "pause."
-	hasPrefix := strings.HasPrefix(g.opts.Name, prefix)
-
-	if (state == Pause && hasPrefix) || (state == Resume && !hasPrefix) {
-		return nil
+func (c *controller) handle(g *grpcServer, event *Event) error {
+	switch event.Type {
+	case Pause:
+		return doPause(g)
+	case Resume:
+		return doResume(g)
 	}
+	return nil
+}
 
-	if err := g.Deregister(); err != nil {
-		log.Log("[controller] Server deregister error: ", err)
-	}
+func (c *controller) RegisterHTTPHandler() error {
+	// Server events
+	registerEventsHandler(c.Mux, c.EventCh)
 
-	if hasPrefix {
-		g.opts.Name = strings.TrimPrefix(g.opts.Name, prefix)
-	} else {
-		g.opts.Name = prefix + g.opts.Name
-	}
-
-	if err := g.Register(); err != nil {
-		log.Log("[controller] Server register error: ", err)
-	}
+	// CoreDump
+	registerCoreDumpHandler(c.Mux)
 
 	return nil
 }
 
-func (c *controller) RegisterHandler() error {
-	http.HandleFunc(pauseHandler(c.SwitchCh))
-	http.HandleFunc(resumeHandler(c.SwitchCh))
-	return nil
+func GetCtlPattern(pattern string) string {
+	return fmt.Sprintf("%s/%s", PatternPrefix, pattern)
 }
 
 func WrapHandler(handler func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
@@ -109,28 +100,6 @@ func WrapHandler(handler func(http.ResponseWriter, *http.Request)) func(http.Res
 	}
 }
 
-func pauseHandler(ch chan<- State) (pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	return "/controller/server-pause", WrapHandler(func(writer http.ResponseWriter, _ *http.Request) {
-		swtichStateHandler(ch, Pause, writer)
-		return
-	})
-}
-
-func resumeHandler(ch chan<- State) (pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	return "/controller/server-resume", WrapHandler(func(writer http.ResponseWriter, _ *http.Request) {
-		swtichStateHandler(ch, Resume, writer)
-	})
-}
-
-func swtichStateHandler(ch chan<- State, state State, writer http.ResponseWriter) {
-	var detail string
-
-	select {
-	case ch <- state:
-		detail = "ok"
-	default:
-		detail = "wait a second"
-	}
-
+func Success(writer http.ResponseWriter, detail string) {
 	_, _ = writer.Write([]byte(errors.New("", detail, 0).Error()))
 }

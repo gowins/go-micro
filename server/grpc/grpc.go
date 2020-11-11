@@ -768,9 +768,9 @@ func (g *grpcServer) Start() error {
 				if err := g.Register(); err != nil {
 					log.Log("Server register error: ", err)
 				}
-			case state := <-g.ctl.SwitchCh:
-				if err := g.ctl.SwitchState(state); err != nil {
-					log.Log("Server switches state error: ", err)
+			case event := <-g.ctl.EventCh:
+				if err := g.ctl.handle(g, event); err != nil {
+					log.Log("Server event error: ", err)
 				}
 			// wait for exit
 			case ch = <-g.exit:
