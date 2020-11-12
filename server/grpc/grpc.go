@@ -71,6 +71,7 @@ func newGRPCServer(opts ...server.Option) server.Server {
 	// create a grpc server
 	srv := &grpcServer{
 		opts: options,
+		ctl:  newCtl(),
 		rpc: &rServer{
 			serviceMap: make(map[string]*service),
 		},
@@ -79,8 +80,6 @@ func newGRPCServer(opts ...server.Option) server.Server {
 		exit:        make(chan chan error),
 		wg:          wait(options.Context),
 	}
-
-	srv.ctl = newCtl(srv)
 
 	// configure the grpc server
 	srv.configure()

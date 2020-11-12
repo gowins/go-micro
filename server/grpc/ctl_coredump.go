@@ -1,6 +1,7 @@
 package grpc
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"runtime/pprof"
@@ -32,8 +33,11 @@ func doDump(name string) {
 		profiles = allProfiles
 	}
 
+	buf := bytes.NewBuffer(nil)
 	for _, profile := range profiles {
-		_ = pprof.Lookup(profile).WriteTo(dumper, dumpDebug)
+		buf.Reset()
+		_ = pprof.Lookup(profile).WriteTo(buf, dumpDebug)
+		_, _ = buf.WriteTo(dumper)
 	}
 }
 
