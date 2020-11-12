@@ -50,16 +50,16 @@ func pauseOrResume(g *grpcServer, eventType int) error {
 }
 
 func pauseHandler(ch chan<- *Event) (pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	return GetCtlPattern("server-pause"), WrapHandler(func(writer http.ResponseWriter, _ *http.Request) {
+	return "server-pause", func(writer http.ResponseWriter, _ *http.Request) {
 		triggerEvent(ch, Pause, writer)
 		return
-	})
+	}
 }
 
 func resumeHandler(ch chan<- *Event) (pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	return GetCtlPattern("server-resume"), WrapHandler(func(writer http.ResponseWriter, _ *http.Request) {
+	return "server-resume", func(writer http.ResponseWriter, _ *http.Request) {
 		triggerEvent(ch, Resume, writer)
-	})
+	}
 }
 
 func triggerEvent(ch chan<- *Event, eventType int, writer http.ResponseWriter) {
@@ -76,6 +76,9 @@ func triggerEvent(ch chan<- *Event, eventType int, writer http.ResponseWriter) {
 }
 
 func registerEventsHandler(mux *http.ServeMux, ch chan<- *Event) {
-	mux.HandleFunc(pauseHandler(ch))
-	mux.HandleFunc(resumeHandler(ch))
+	pattern, handler := pauseHandler(ch)
+	handleFunc(mux, pattern, handler)
+
+	pattern, handler = resumeHandler(ch)
+	handleFunc(mux, pattern, handler)
 }

@@ -731,7 +731,7 @@ func (g *grpcServer) Start() error {
 
 	log.Logf("Broker [%s] Listening on %s", config.Broker.String(), config.Broker.Address())
 
-	if err := g.ctl.start(); err != nil {
+	if err := g.ctl.start(g.opts.CtlHdlrs); err != nil {
 		log.Log("Controller start error: ", err)
 	}
 
@@ -769,7 +769,7 @@ func (g *grpcServer) Start() error {
 				}
 			case event := <-g.ctl.EventCh:
 				if err := g.ctl.handle(g, event); err != nil {
-					log.Log("Server event error: ", err)
+					log.Log("Controller event error: ", err)
 				}
 			// wait for exit
 			case ch = <-g.exit:

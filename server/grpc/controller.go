@@ -20,19 +20,19 @@ const (
 )
 
 type controller struct {
-	Mux     *http.ServeMux
+	mux     *http.ServeMux
 	Port    string
 	EventCh chan *Event
 }
 
 func newCtl() *controller {
 	return &controller{
-		Mux:     http.NewServeMux(),
+		mux:     http.NewServeMux(),
 		EventCh: make(chan *Event),
 	}
 }
 
-func (c *controller) start() error {
+func (c *controller) start(ctlHdlrs map[string]func(http.ResponseWriter, *http.Request)) error {
 	ln, err := net.Listen("tcp", server.DefaultAddress)
 	if err != nil {
 		return err
@@ -40,12 +40,18 @@ func (c *controller) start() error {
 
 	log.Logf("Controller [http] Listening on %s", ln.Addr().String())
 
-	if err := c.RegisterHTTPHandler(); err != nil {
-		return err
+	// Server events
+	registerEventsHandler(c.mux, c.EventCh)
+
+	// CoreDump
+	registerCoreDumpHandler(c.mux)
+
+	for pattern, handler := range ctlHdlrs {
+		handleFunc(c.mux, pattern, handler)
 	}
 
 	go func() {
-		if err := http.Serve(ln, c.Mux); err != nil {
+		if err := http.Serve(ln, c.mux); err != nil {
 			log.Log("[controller] Http ListenAndServe error: ", err)
 		}
 	}()
@@ -69,22 +75,23 @@ func (c *controller) handle(g *grpcServer, event *Event) error {
 	return nil
 }
 
-func (c *controller) RegisterHTTPHandler() error {
-	// Server events
-	registerEventsHandler(c.Mux, c.EventCh)
-
-	// CoreDump
-	registerCoreDumpHandler(c.Mux)
-
-	return nil
+func handleFunc(mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	mux.HandleFunc(getCtlPattern(pattern), wrapHandler(handler))
 }
 
-func GetCtlPattern(pattern string) string {
+// pattern = "check" => /controller/check
+func getCtlPattern(pattern string) string {
 	return fmt.Sprintf("%s/%s", PatternPrefix, pattern)
 }
 
-func WrapHandler(handler func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+func wrapHandler(handler func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
 	return func(writer http.ResponseWriter, request *http.Request) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Logf("[controller] Panic: %v", r)
+			}
+		}()
+
 		body, err := ioutil.ReadAll(request.Body)
 		if err != nil {
 			_, _ = writer.Write(

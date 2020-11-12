@@ -42,16 +42,17 @@ func doDump(name string) {
 }
 
 func coreDumpHandler(name string) (pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	return GetCtlPattern(fmt.Sprintf("%s-dump", name)), WrapHandler(func(writer http.ResponseWriter, _ *http.Request) {
+	return fmt.Sprintf("%s-dump", name), func(writer http.ResponseWriter, _ *http.Request) {
 		doDump(name)
 		Success(writer, OK)
-	})
+	}
 }
 
 func registerCoreDumpHandler(mux *http.ServeMux) {
 	profiles := append(allProfiles, "all")
 
 	for _, profile := range profiles {
-		mux.HandleFunc(coreDumpHandler(profile))
+		pattern, handler := coreDumpHandler(profile)
+		handleFunc(mux, pattern, handler)
 	}
 }

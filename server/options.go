@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ type Options struct {
 	Advertise    string
 	Id           string
 	Version      string
+	CtlHdlrs      map[string]func(http.ResponseWriter, *http.Request)
 	HdlrWrappers []HandlerWrapper
 	SubWrappers  []SubscriberWrapper
 
@@ -226,5 +228,15 @@ func WrapHandler(w HandlerWrapper) Option {
 func WrapSubscriber(w SubscriberWrapper) Option {
 	return func(o *Options) {
 		o.SubWrappers = append(o.SubWrappers, w)
+	}
+}
+
+// Adds a control handler to a list of options passed into the server
+func RegisterCtlHandler(pattern string, handler func(http.ResponseWriter, *http.Request)) Option {
+	return func(o *Options) {
+		if o.CtlHdlrs == nil {
+			o.CtlHdlrs = make(map[string]func(http.ResponseWriter, *http.Request))
+		}
+		o.CtlHdlrs[pattern] = handler
 	}
 }

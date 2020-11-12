@@ -2,6 +2,7 @@ package micro
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/micro/cli"
@@ -220,6 +221,14 @@ func WrapSubscriber(w ...server.SubscriberWrapper) Option {
 
 		// Init once
 		o.Server.Init(wrappers...)
+	}
+}
+
+// Adds a control handler to a list of options passed into the server
+func RegisterCtlHandler(pattern string, handler func(http.ResponseWriter, *http.Request)) Option {
+	return func(o *Options) {
+		// Init once
+		o.Server.Init(server.RegisterCtlHandler(pattern, handler))
 	}
 }
 
