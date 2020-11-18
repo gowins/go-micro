@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-
 	"net/http"
 	"sort"
 	"sync"
@@ -278,6 +277,14 @@ func (e *httpServer) startListen() (err error) {
 
 func (e *httpServer) Start() error {
 	return e.startListen()
+}
+
+func (e *httpServer) Pause() error {
+	return nil
+}
+
+func (e *httpServer) Resume() error {
+	return nil
 }
 
 type newListener struct{}
