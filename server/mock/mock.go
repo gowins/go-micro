@@ -118,6 +118,14 @@ func (m *MockServer) Start() error {
 	return nil
 }
 
+func (m *MockServer) Pause() error {
+	return nil
+}
+
+func (m *MockServer) Resume() error {
+	return nil
+}
+
 func (m *MockServer) Stop() error {
 	m.Lock()
 	defer m.Unlock()

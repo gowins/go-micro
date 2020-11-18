@@ -604,6 +604,14 @@ func (s *rpcServer) Start() error {
 	return nil
 }
 
+func (s *rpcServer) Pause() error {
+	return nil
+}
+
+func (s *rpcServer) Resume() error {
+	return nil
+}
+
 func (s *rpcServer) Stop() error {
 	ch := make(chan error)
 	s.exit <- ch

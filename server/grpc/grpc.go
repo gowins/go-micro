@@ -45,10 +45,11 @@ const (
 )
 
 type grpcServer struct {
-	rpc  *rServer
-	srv  *grpc.Server
-	exit chan chan error
-	wg   *sync.WaitGroup
+	rpc   *rServer
+	srv   *grpc.Server
+	event chan Event
+	exit  chan chan error
+	wg    *sync.WaitGroup
 
 	sync.RWMutex
 	opts        server.Options
@@ -75,6 +76,7 @@ func newGRPCServer(opts ...server.Option) server.Server {
 		},
 		handlers:    make(map[string]server.Handler),
 		subscribers: make(map[*subscriber][]broker.Subscriber),
+		event:       make(chan Event),
 		exit:        make(chan chan error),
 		wg:          wait(options.Context),
 	}
@@ -760,6 +762,11 @@ func (g *grpcServer) Start() error {
 				if err := g.Register(); err != nil {
 					log.Log("Server register error: ", err)
 				}
+			// Waiting for an event
+			case e := <-g.event:
+				if err := g.handlerEvent(e); err != nil {
+					log.Log("Server handlers event error: ", err)
+				}
 			// wait for exit
 			case ch = <-g.exit:
 				break Loop
@@ -800,6 +807,52 @@ func (g *grpcServer) Start() error {
 
 		log.Log("[ExitProgress] All is done.")
 	}()
+
+	return nil
+}
+
+func (g *grpcServer) Pause() error {
+	return g.triggerEventWithTimeout(Pause)
+}
+
+func (g *grpcServer) Resume() error {
+	return g.triggerEventWithTimeout(Resume)
+}
+
+func (g *grpcServer) triggerEventWithTimeout(e Event) error {
+	timer := time.NewTimer(DefaultEventTimeout)
+	defer timer.Stop()
+
+	select {
+	case g.event <- e:
+		log.Logf("Server handles %s event", e)
+	case <-timer.C:
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+func (g *grpcServer) handlerEvent(e Event) error {
+	prefix := "pause."
+	hasPrefix := strings.HasPrefix(g.opts.Name, prefix)
+
+	if (e == Pause && hasPrefix) || (e == Resume && !hasPrefix) {
+		return nil
+	}
+
+	if err := g.Deregister(); err != nil {
+		log.Log("[event] Server deregister error: ", err)
+	}
+
+	if hasPrefix {
+		g.opts.Name = strings.TrimPrefix(g.opts.Name, prefix)
+	} else {
+		g.opts.Name = prefix + g.opts.Name
+	}
+
+	if err := g.Register(); err != nil {
+		log.Log("[event] Server register error: ", err)
+	}
 
 	return nil
 }

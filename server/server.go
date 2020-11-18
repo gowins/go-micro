@@ -22,6 +22,8 @@ type Server interface {
 	NewSubscriber(string, interface{}, ...SubscriberOption) Subscriber
 	Subscribe(Subscriber) error
 	Start() error
+	Pause() error
+	Resume() error
 	Stop() error
 	String() string
 }
