@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"crypto/tls"
+	"os"
 
 	"github.com/micro/go-micro/broker"
 	"github.com/micro/go-micro/codec"
@@ -99,6 +100,12 @@ func newOptions(opt ...server.Option) server.Options {
 
 	if len(opts.Name) == 0 {
 		opts.Name = server.DefaultName
+	}
+
+	if name, err := os.Hostname(); err != nil {
+		opts.Hostname = "unknown"
+	} else {
+		opts.Hostname = name
 	}
 
 	if len(opts.Id) == 0 {
