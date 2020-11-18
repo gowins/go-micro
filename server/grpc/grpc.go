@@ -547,7 +547,7 @@ func (g *grpcServer) Register() error {
 
 	// register service
 	node := &registry.Node{
-		Id:       config.Name + "-" + config.Id,
+		Id:       config.Name + "-" + config.Hostname + "-" + config.Id,
 		Address:  addr,
 		Port:     port,
 		Metadata: config.Metadata,
@@ -671,7 +671,7 @@ func (g *grpcServer) Deregister() error {
 	}
 
 	node := &registry.Node{
-		Id:      config.Name + "-" + config.Id,
+		Id:      config.Name + "-" + config.Hostname + "-" + config.Id,
 		Address: addr,
 		Port:    port,
 	}
