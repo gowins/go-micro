@@ -122,12 +122,15 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	}
 
 	// Set content subtype
-	if opts.ContentSubtype != "" {
-		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.CallContentSubtype(opts.ContentSubtype)))
+	// 1. from request
+	// 2. from user provide
+	contentSubtype := opts.ContentSubtype
+	if opts.ContentSubtypeFromRequest {
+		contentSubtype = cf.Name()
 	}
 
-	if opts.ContentSubtypeFromRequest {
-		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.CallContentSubtype(cf.Name())))
+	if contentSubtype != "" {
+		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.CallContentSubtype(contentSubtype)))
 	}
 
 	cc, err := g.pool.GetConn(address, dialOpts...)
