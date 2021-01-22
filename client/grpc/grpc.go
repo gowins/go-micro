@@ -112,12 +112,25 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	maxRecvMsgSize := g.maxRecvMsgSizeValue()
 	maxSendMsgSize := g.maxSendMsgSizeValue()
 
-	cc, err := g.pool.GetConn(address, grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
+	dialOpts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
 		grpc.WithTimeout(opts.DialTimeout), g.secure(),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
 			grpc.MaxCallSendMsgSize(maxSendMsgSize),
-		))
+		),
+	}
+
+	// Set content subtype
+	if opts.ContentSubtype != "" {
+		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.CallContentSubtype(opts.ContentSubtype)))
+	}
+
+	if opts.ContentSubtypeFromRequest {
+		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.CallContentSubtype(cf.Name())))
+	}
+
+	cc, err := g.pool.GetConn(address, dialOpts...)
 	if err != nil {
 		return errors.InternalServerError("go.micro.client", fmt.Sprintf("Error sending request: %v", err))
 	}
