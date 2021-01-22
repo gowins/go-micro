@@ -112,28 +112,12 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 	maxRecvMsgSize := g.maxRecvMsgSizeValue()
 	maxSendMsgSize := g.maxSendMsgSizeValue()
 
-	dialOpts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
+	cc, err := g.pool.GetConn(address, grpc.WithDefaultCallOptions(grpc.ForceCodec(cf)),
 		grpc.WithTimeout(opts.DialTimeout), g.secure(),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
 			grpc.MaxCallSendMsgSize(maxSendMsgSize),
-		),
-	}
-
-	// Set content subtype
-	// 1. from request
-	// 2. from user provide
-	contentSubtype := opts.ContentSubtype
-	if opts.ContentSubtypeFromRequest {
-		contentSubtype = cf.Name()
-	}
-
-	if contentSubtype != "" {
-		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.CallContentSubtype(contentSubtype)))
-	}
-
-	cc, err := g.pool.GetConn(address, dialOpts...)
+		))
 	if err != nil {
 		return errors.InternalServerError("go.micro.client", fmt.Sprintf("Error sending request: %v", err))
 	}
@@ -153,8 +137,21 @@ func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.R
 		g.pool.Release(address, cc, err)
 	}()
 
+	// Set call content subtype
+	// 1. from request
+	// 2. from user provide
+	contentSubtype := opts.ContentSubtype
+	if opts.ContentSubtypeFromRequest {
+		contentSubtype = cf.Name()
+	}
+
+	callOpts := []grpc.CallOption{grpc.ForceCodec(cf)}
+	if contentSubtype != "" {
+		callOpts = append(callOpts, grpc.CallContentSubtype(contentSubtype))
+	}
+
 	go func() {
-		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, grpc.ForceCodec(cf))
+		err := cc.Invoke(ctx, methodToGRPC(req.Service(), req.Endpoint()), req.Body(), rsp, callOpts...)
 		ch <- err
 	}()
 
