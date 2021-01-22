@@ -62,6 +62,10 @@ type CallOptions struct {
 	// Other options for implementations of the interface
 	// can be stored in a context
 	Context context.Context
+
+	// content subtype
+	ContentSubtype            string
+	ContentSubtypeFromRequest bool
 }
 
 type PublishOptions struct {
@@ -255,6 +259,18 @@ func WithAddress(a ...string) CallOption {
 func WithSelectOption(so ...selector.SelectOption) CallOption {
 	return func(o *CallOptions) {
 		o.SelectOptions = append(o.SelectOptions, so...)
+	}
+}
+
+func ContentSubtype(cf string) CallOption {
+	return func(o *CallOptions) {
+		o.ContentSubtype = cf
+	}
+}
+
+func ContentSubtypeFromRequest() CallOption {
+	return func(o *CallOptions) {
+		o.ContentSubtypeFromRequest = true
 	}
 }
 
