@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/micro/go-micro/broker"
@@ -737,15 +736,11 @@ func (g *grpcServer) Start() error {
 		return err // 如果首次注册失败，则不让服务启
 	}
 
-	// 通过以下变量来确定服务还在正常的服务状态中
-	var serving int32
-	atomic.StoreInt32(&serving, 1)
 	// micro: go ts.Accept(s.accept)
 	go func() {
 		if err := g.srv.Serve(ts); err != nil {
 			log.Log("gRPC Server start error: ", err)
 		}
-		atomic.StoreInt32(&serving, 0)
 	}()
 
 	go func() {
@@ -762,11 +757,6 @@ func (g *grpcServer) Start() error {
 
 	Loop:
 		for {
-			// 检查是否在服务状态中，如果不在则走退出流程
-			if atomic.LoadInt32(&serving) == 0 {
-				break Loop
-			}
-
 			select {
 			// register self on interval
 			case <-t.C:
