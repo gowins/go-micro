@@ -26,7 +26,6 @@ import (
 
 	// registries
 	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/registry/consul"
 	"github.com/micro/go-micro/registry/gossip"
 	"github.com/micro/go-micro/registry/mdns"
 	rmem "github.com/micro/go-micro/registry/memory"
@@ -187,7 +186,6 @@ var (
 	}
 
 	DefaultRegistries = map[string]func(...registry.Option) registry.Registry{
-		"consul": consul.NewRegistry,
 		"gossip": gossip.NewRegistry,
 		"mdns":   mdns.NewRegistry,
 		"memory": rmem.NewRegistry,
