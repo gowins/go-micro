@@ -10,6 +10,7 @@ import (
 	simple "github.com/bitly/go-simplejson"
 	"github.com/micro/go-micro/config/reader"
 	"github.com/micro/go-micro/config/source"
+	"github.com/micro/go-micro/util/log"
 )
 
 type jsonValues struct {
@@ -38,7 +39,11 @@ func newValue(s *simple.Json) reader.Value {
 }
 
 func (j *jsonValues) Get(path ...string) reader.Value {
-	return &jsonValue{j.sj.GetPath(path...)}
+	jin := j.sj.GetPath(path...)
+	if jin.Interface() == nil {
+		log.Logf("[Config] Get, err: key not found, paths:%v", path)
+	}
+	return &jsonValue{jin}
 }
 
 func (j *jsonValues) Del(path ...string) {
