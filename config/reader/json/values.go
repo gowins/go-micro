@@ -41,7 +41,11 @@ func newValue(s *simple.Json) reader.Value {
 func (j *jsonValues) Get(path ...string) reader.Value {
 	jin := j.sj.GetPath(path...)
 	if jin.Interface() == nil {
-		log.Logf("[Config] Get, err: key not found, paths:%v", path)
+		if len(path) == 0 {
+			log.Log("[Config] Get, err: path is nil")
+		} else {
+			log.Logf("[Config] Get, err: key not found, paths:%v", path)
+		}
 	}
 	return &jsonValue{jin}
 }
